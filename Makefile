@@ -52,6 +52,20 @@ $(RTL_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_rtl.o $(OBJ_DIR)/device_rtl.o | $(BIN_DI
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) $(RTL_LIBS)
 	@echo "✓ Build successful: $@"
 
+# Installation (PREFIX and DESTDIR follow GNU conventions; DESTDIR is meant
+# for staging to a package root, e.g. make install DESTDIR=/tmp/pkg)
+PREFIX ?= /usr/local
+BINDIR := $(PREFIX)/bin
+
+.PHONY: install
+install: all
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(FILE_BIN) $(RTL_BIN) $(DESTDIR)$(BINDIR)
+	@[ -z '$(TARGET_SUFFIX)' ] || for b in file_lora rtl_lora; do \
+		mv $(DESTDIR)$(BINDIR)/$$b$(TARGET_SUFFIX) $(DESTDIR)$(BINDIR)/$$b; \
+	done
+	@echo "✓ Installed to $(DESTDIR)$(BINDIR)"
+
 # Profiling builds (valgrind/callgrind); do not touch obj/ or bin/ builds
 .PHONY: profile
 profile:
@@ -121,6 +135,7 @@ help:
 	@echo "rxx_lora Makefile Targets"
 	@echo "========================"
 	@echo "  all         - Build bin/file_lora (default)"
+	@echo "  install     - Install bin/file_lora and bin/rtl_lora to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
 	@echo "  clean       - Remove build artifacts (obj/, bin/)"

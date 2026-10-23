@@ -31,8 +31,7 @@ __pycache__/
 *.tmp
 *.json
 
-# Experiment captures (recordings + logs)
-run*/
+!img/*.png
 
 # Performance profiling outputs
 callgrind.out*
@@ -40,8 +39,3 @@ massif.out*
 
 # Generated API docs
 docs/doxygen/
-
-
-# Test data and it's previews (LFS)
-!data/*/*.cf32
-!data/*/*.png

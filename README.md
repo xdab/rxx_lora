@@ -4,25 +4,9 @@ A plug-and-play RTL-SDR **[LoRa](https://lora-alliance.org/)** receiver in the s
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
 USB dongle in, decoded packets out, no GNU Radio.
 
-| Meshtastic packets from an I/Q capture file                                       |
-| --------------------------------------------------------------------------------- |
-| <img src="img/console-jsonl.png" alt="JSONL output in the terminal" width="400"/> |
-
-> TODO: Gallery to be expanded
-
-## Performance
-
-End-to-end simulation under AWGN shows satisfactory results.
-
-For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1–2 dB** of theoretical performance at SNRs above -15 dB.
-
-| BER vs SNR under AWGN                                             |
-| ----------------------------------------------------------------- |
-| <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="400"/> |
-
-Information regarding the used theoretical curves can be found under [docs/ber-theory](docs/ber-theory.md).
-
-_Note on low SNRs:_ Full packet loss is the dominant failure mode at low signal levels. In our simulation, a lost packet registers as 100% bit errors, where the theoretical curve only reaches a 50% "coin-flip" error rate.
+| Packets from an I/Q capture file                                   | Meshtastic frames from an RTL-SDR                                     |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| <img src="img/console-jsonl.png" alt="JSONL packets" width="350"/> | <img src="img/console-mesh.png" alt="Meshtastic frames" width="350"/> |
 
 ## Dependencies
 
@@ -52,17 +36,21 @@ Naturally, the likes of `librtlsdr` are unavoidable if support for the actual de
 - Python 3.10 (or higher)
 - `numpy` `matplotlib`
 - (Optional) `ruff` linter and formatter
+- (Optional) the [Meshtastic](https://pypi.org/project/meshtastic/) library; for `tools/mesh_rx.py`
 
 ## Building, testing and running
 
 ```sh
-# Full build (of both binaries)
-make
+# The usual make targets
+make 
+sudo make install
 
-# Quick test (at least on typical hw)
+# Quick tests
 python3 tools/regression.py
+python3 tools/regression_perf.py
 
 # Help
+make help
 file_lora -h
 rtl_lora -h
 
@@ -71,6 +59,9 @@ file_lora -w 0 -s7 -o4 --center-freq 868e6 --bw 125e3 --input-rate 1.024e6 captu
 
 # RTL-SDR, Meshtastic MediumFast -> console
 rtl_lora -w 0x2b -s9 -o8 --center-freq 869.525e6 --bw 125e3 --input-rate 1.024e6 capture_o4.cf32 -q2
+
+# Python tool using rtl_lora, decoding Meshtastic frames 
+python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4
 ```
 
 ## Credits
@@ -107,6 +98,18 @@ One way or the other, `liquid-dsp`'s code **is** used by this project. Credit is
 ### Literature
 
 > TODO: Full listing to be added
+
+## Performance
+
+End-to-end simulation under AWGN shows satisfactory results.
+
+For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1–2 dB** of theoretical performance at SNRs above -15 dB.
+
+| BER vs SNR under AWGN                                             |
+| ----------------------------------------------------------------- |
+| <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="400"/> |
+
+Information regarding the used theoretical curves can be found under [docs/ber-theory](docs/ber-theory.md).
 
 ## Slop alert
 
