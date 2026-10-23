@@ -163,11 +163,13 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     float cfo_coarse = util_round((float)down_signed / 2.0f - s->cfo);
     s->cfo = cfo_coarse + s->cfo; // the estimate is now complete
 
-    { // EXPERIMENT: nudge the whole estimate (bins)
+#if RXX_EXPERIMENTAL // env-var knob: nudge the whole estimate (bins)
+    {
         const char *e = getenv("RTL_CFO_ADD");
         if (e)
             s->cfo += (float)atof(e);
     }
+#endif
 
     log_trace(
         "cfo: SFD down_val=%d (signed %+d, half-bin grid -> whole bin "
@@ -222,11 +224,13 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
      * hold. */
     s->sfo_hat = (s->center_freq != 0) ? (s->cfo * s->bandwidth) / s->center_freq : 0.0f;
 
-    { // EXPERIMENT: force the SFO estimate (chips/symbol)
+#if RXX_EXPERIMENTAL // env-var knob: force the SFO estimate (chips/symbol)
+    {
         const char *e = getenv("RTL_SFO_SET");
         if (e)
             s->sfo_hat = (float)atof(e);
     }
+#endif
 
     double clk_off = s->sfo_hat / n;
     double fs = s->bandwidth;

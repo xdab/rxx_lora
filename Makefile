@@ -17,6 +17,15 @@ OBJ_DIR := obj/prof
 TARGET_SUFFIX := .prof
 endif
 
+# Experimental build (make experimental): compiles the RXX_EXPERIMENTAL hooks
+# (env-var experiment knobs) in; default builds contain none of that code.
+# Separate obj dir and *.exp binaries, like the profile mode
+ifeq ($(EXPERIMENTAL),1)
+CFLAGS += -DRXX_EXPERIMENTAL=1
+OBJ_DIR := obj/exp
+TARGET_SUFFIX := .exp
+endif
+
 # Sources: the entry points and device backends are per-binary, everything
 # else is shared core
 ENTRY_SRC := $(SRC_DIR)/main_file.c $(SRC_DIR)/main_rtl.c
@@ -70,6 +79,11 @@ install: all
 .PHONY: profile
 profile:
 	$(MAKE) PROFILE=1 all
+
+# Experimental binaries: env-var knobs compiled in (see AGENTS.md)
+.PHONY: experimental
+experimental:
+	$(MAKE) EXPERIMENTAL=1 all
 
 # Compile database for editor tooling (clangd finds it automatically; point
 # cpptools at it via C_Cpp.default.compileCommands). Regenerate after adding
@@ -137,6 +151,7 @@ help:
 	@echo "  all         - Build bin/file_lora (default)"
 	@echo "  install     - Install bin/file_lora and bin/rtl_lora to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
+	@echo "  experimental - Build *.exp binaries with the RXX_EXPERIMENTAL hooks compiled in"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
 	@echo "  clean       - Remove build artifacts (obj/, bin/)"
 	@echo "  doc         - Generate API docs with doxygen"

@@ -66,6 +66,7 @@ cross-check os/sf/bw whenever they meet.
 ## Constraints
 
 - C logging goes through `src/logging.{c,h}` (`log_trace/debug/info/warn/error`) to stderr.
+- Experiment/debug hooks are env-var knobs compiled in only by `make experimental` (guarded by `#if RXX_EXPERIMENTAL`); default builds contain none of that code. Grep the codebase for `RXX_EXPERIMENTAL` for the current inventory.
 
 ## Glossary, nomenclature
 

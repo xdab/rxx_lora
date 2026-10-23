@@ -124,21 +124,30 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     if (fc_max > 0.499f)
         fc_max = 0.499f;
 
-    const char *em = getenv("RESAMP_M");
-    const char *ebw = getenv("RESAMP_BW");
-    const char *eas = getenv("RESAMP_AS");
-    const char *enpfb = getenv("RESAMP_NPFB");
+    unsigned m = 4;
+    unsigned as = 60;
+    unsigned npfb = 64;
 
-    if (ebw)
-        bw_rel = (float)atof(ebw);
+#if RXX_EXPERIMENTAL // env-var overrides for filter experiments
+    {
+        const char *e = getenv("RESAMP_M");
+        if (e)
+            m = (unsigned)atoi(e);
+        e = getenv("RESAMP_AS");
+        if (e)
+            as = (unsigned)atof(e);
+        e = getenv("RESAMP_NPFB");
+        if (e)
+            npfb = (unsigned)atoi(e);
+        e = getenv("RESAMP_BW");
+        if (e)
+            bw_rel = (float)atof(e);
+    }
+#endif
 
     float fc = 0.5f * bw_rel;
     if (!(fc > 0.0f) || fc > fc_max)
         fc = fc_max;
-
-    unsigned m = em ? (unsigned)atoi(em) : 4;
-    unsigned as = eas ? (unsigned)atof(eas) : 60;
-    unsigned npfb = enpfb ? (unsigned)atoi(enpfb) : 64;
 
     if (m < 1 || npfb < 1)
     {
