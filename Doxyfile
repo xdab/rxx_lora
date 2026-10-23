@@ -1,0 +1,21 @@
+# rtl_lora API documentation — run via `make doc`
+
+PROJECT_NAME           = "rtl_lora"
+PROJECT_BRIEF          = "Plug-and-play RTL-SDR LoRa receiver"
+
+# Sources; re-add README.md to INPUT + USE_MDFILE_AS_MAINPAGE once it exists
+INPUT                  = include src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.c *.h
+EXCLUDE_PATTERNS       = */obj/*
+
+# Document everything, even entities without a doc comment
+EXTRACT_ALL            = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+# HTML only
+GENERATE_LATEX         = NO
+OUTPUT_DIRECTORY       = docs/doxygen
+HTML_OUTPUT            = html
+
+QUIET                  = YES

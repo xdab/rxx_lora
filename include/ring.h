@@ -1,0 +1,49 @@
+#ifndef RING_H
+#define RING_H
+
+#include <complex.h>
+#include <stddef.h>
+
+/**
+ * Sliding-window sample buffer backing the pull source (source.c): append at
+ * the tail, consume from the head, ring_peek() always returns a contiguous
+ * pointer into linear storage (the DSP indexes windows in both directions, so
+ * a wrapped circular view would not do). Compaction of the consumed head is
+ * lazy: ring_drop() moves the live samples down once the dead prefix reaches
+ * `chunk`.
+ */
+struct ring;
+
+struct ring;
+
+/**
+ * Create an empty ring; `chunk` is the dead-prefix size (samples) that
+ * triggers a compaction. Returns NULL on allocation failure.
+ */
+struct ring *ring_create(size_t chunk);
+
+void ring_destroy(struct ring *r);
+
+/** Live samples held. */
+size_t ring_len(const struct ring *r);
+
+/**
+ * Make room for n more appended samples, compacting and/or growing as needed.
+ * Returns 0 on success, -1 on allocation failure.
+ */
+int ring_reserve(struct ring *r, size_t n);
+
+/** Append n samples; ring_reserve(r, n) must have succeeded first. */
+void ring_write(struct ring *r, const float complex *in, size_t n);
+
+/** Drop the n oldest samples (n <= ring_len); compacts when the dead prefix
+ * reaches `chunk`. */
+void ring_drop(struct ring *r, size_t n);
+
+/**
+ * Contiguous view of n samples starting at offset off from the oldest
+ * (off + n <= ring_len). Valid until the next reserve/write/drop.
+ */
+const float complex *ring_peek(const struct ring *r, size_t off, size_t n);
+
+#endif // RING_H

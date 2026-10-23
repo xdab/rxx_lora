@@ -1,0 +1,50 @@
+# Build artifacts
+obj/
+bin/
+compile_commands.json
+*.o
+*.d
+
+# Python bytecode
+__pycache__/
+
+# System files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE directories
+.vscode/
+.idea/
+
+# Dependencies
+*.a
+*.so
+
+# Raw data files, plots
+*.raw
+*.cf32
+*.f32
+*.png
+*.wav
+*.tmp
+*.json
+
+# Experiment captures (recordings + logs)
+run*/
+
+# Performance profiling outputs
+callgrind.out*
+massif.out*
+
+# Generated API docs
+docs/doxygen/
+
+# Tool-generated guidebook and figures
+docs/ca/_pdf/
+docs/ca/figs/
+
+# Test data and it's previews (LFS)
+!data/*/*.cf32
+!data/*/*.png
