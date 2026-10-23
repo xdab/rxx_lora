@@ -4,7 +4,7 @@
  * DETECT state lives in detect.c, SYNC/SFO_COMPENSATION in sync.c.
  */
 
-#include "frame_sync.h"
+#include "frame_sync_internal.h"
 
 #include "logging.h"
 #include "utilities.h"
@@ -12,10 +12,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void frame_sync_cleanup(struct frame_sync *s);
+
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
 // [gr-lora] demod_impl.cc:54
-int frame_sync_init(
-    struct frame_sync_state *s,
+struct frame_sync *frame_sync_create(
     uint8_t spreading_factor,
     uint8_t oversampling_factor,
     uint16_t preamble_len,
@@ -24,7 +25,10 @@ int frame_sync_init(
     uint32_t bandwidth,
     uint8_t detect_avg)
 {
-    memset(s, 0, sizeof(*s));
+    struct frame_sync *s = calloc(1, sizeof(*s));
+    if (!s)
+        return NULL;
+
     s->spreading_factor = spreading_factor;
     s->oversampling_factor = oversampling_factor;
     s->preamble_len = preamble_len;
@@ -91,7 +95,7 @@ int frame_sync_init(
         !s->est_k0_mag || !s->cx_in || !s->cx_out || !s->fft_mag ||
         (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_avg || !s->detect_mag_sum)))
     {
-        log_error("frame_sync_init: out of memory\n");
+        log_error("frame_sync_create: out of memory\n");
         goto out;
     }
     memset(s->preamb_up_vals, 0, s->n_up_req * sizeof(*s->preamb_up_vals));
@@ -100,24 +104,28 @@ int frame_sync_init(
     s->fft_cfg = dsp_fft_alloc((int)s->number_of_bins);
     if (!s->fft_cfg)
     {
-        log_error("frame_sync_init: dsp_fft_alloc failed\n");
+        log_error("frame_sync_create: dsp_fft_alloc failed\n");
         goto out;
     }
     s->est_fft_cfg = dsp_fft_alloc(2 * (int)s->number_of_bins);
     if (!s->est_fft_cfg)
     {
-        log_error("frame_sync_init: 2N dsp_fft_alloc failed\n");
+        log_error("frame_sync_create: 2N dsp_fft_alloc failed\n");
         goto out;
     }
     ret = 0;
 out:
     if (ret < 0)
+    {
         frame_sync_cleanup(s);
-    return ret;
+        free(s);
+        s = NULL;
+    }
+    return s;
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:108; [gr-lora] demod_impl.cc:109
-void frame_sync_cleanup(struct frame_sync_state *s)
+static void frame_sync_cleanup(struct frame_sync *s)
 {
     free(s->preamb_up_vals);
     free(s->detect_run_srcs);
@@ -155,12 +163,20 @@ void frame_sync_cleanup(struct frame_sync_state *s)
     memset(s, 0, sizeof(*s));
 }
 
+void frame_sync_destroy(struct frame_sync *s)
+{
+    if (!s)
+        return;
+    frame_sync_cleanup(s);
+    free(s);
+}
+
 /* Reference: [gr-lora_sdr] frame_sync_impl.cc:874-880,404-411. The reference
  * re-arms its DETECT fields alone; this port also clears the one-shot
  * cfo_est_done and the DETECT averaging ring, kept across frames — left set,
  * the next frame's SYNC would reuse the previous frame's CFO, and its first
  * detect windows would average in the finished frame's spectra. */
-void frame_sync_reset_detect(struct frame_sync_state *s)
+void frame_sync_reset_detect(struct frame_sync *s)
 {
     s->phase = FS_DETECT;
     s->symbol_cnt = 1;
@@ -169,7 +185,7 @@ void frame_sync_reset_detect(struct frame_sync_state *s)
     // re-run the CFO/STO estimator on the next frame's preamble
     s->cfo_est_done = 0;
     s->cfo_applied = 0.0f;
-    // the caller's frame_info handshake is per-frame
+    // the caller's symbol-budget handshake is per-frame
     s->symb_numb = 0;
     s->received_head = 0;
     s->consume = 0;
@@ -181,9 +197,37 @@ void frame_sync_reset_detect(struct frame_sync_state *s)
         memset(s->detect_mag_sum, 0, s->number_of_bins * sizeof(*s->detect_mag_sum));
 }
 
+void frame_sync_set_symbol_budget(struct frame_sync *s, uint32_t symb_numb)
+{
+    s->symb_numb = symb_numb;
+    s->received_head = 1;
+}
+
+void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
+{
+    *st = (struct frame_sync_status){
+        .sf = s->spreading_factor,
+        .os = s->oversampling_factor,
+        .samples_per_symbol = s->samples_per_symbol,
+        .number_of_bins = s->number_of_bins,
+        .bandwidth = s->bandwidth,
+        .k_hat = s->k_hat,
+        .n_up_req = s->n_up_req,
+        .down_val = s->down_val,
+        .cfo = s->cfo,
+        .sfo_hat = s->sfo_hat,
+        .sto_frac = s->sto_frac,
+        .netid_dec = {s->netid_dec[0], s->netid_dec[1]},
+        .sync_words = {s->sync_words[0], s->sync_words[1]},
+        .sync_word_rx = s->sync_word_rx,
+        .symbol_cnt = s->symbol_cnt,
+        .bin_idx = s->bin_idx,
+    };
+}
+
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:499-501
 void frame_sync_downsample_prologue(
-    struct frame_sync_state *s, const float complex *in, float complex *dst)
+    struct frame_sync *s, const float complex *in, float complex *dst)
 {
     int sto_samp = util_round(s->sto_frac * s->oversampling_factor);
     for (uint32_t ii = 0; ii < s->number_of_bins; ii++)
@@ -197,7 +241,7 @@ void frame_sync_downsample_prologue(
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:322; [gr-lora] demod_impl.cc:199-206
 int frame_sync_get_symbol_val(
-    struct frame_sync_state *s, const float complex *samples, const float complex *ref_chirp)
+    struct frame_sync *s, const float complex *samples, const float complex *ref_chirp)
 {
     double sig_en = 0;
 

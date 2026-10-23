@@ -1,7 +1,8 @@
 /**
  * @file frame_sync.h
- * @brief LoRa frame synchronization state: configuration, result fields,
- *        lifecycle, and the shared dechirp-FFT kernel.
+ * @brief LoRa frame synchronization: DETECT > SYNC > corrected payload
+ *        windows. The state is opaque; the caller drives the state machine
+ *        with the step functions and reads results through the snapshot.
  */
 
 #ifndef FRAME_SYNC_H
@@ -10,8 +11,6 @@
 #include <complex.h>
 #include <stdint.h>
 
-#include "dsp.h"
-
 /**
  * DETECT->SYNC look-ahead (this port): when the detector fires it scans this
  * many windows forward for the sync word's signature (see detect.c), so the
@@ -19,118 +18,51 @@
  */
 #define SYNC_LOOKAHEAD 12
 
-/** Detector phase, mirroring the reference's m_state enum. */
-enum frame_sync_phase
-{
-    FS_DETECT = 0, // sliding decision windows, hunting stable bins
-    FS_SYNC = 1,   // frame found; estimating and checking the sync word
-    FS_SFO_COMP,   // locked; producing corrected payload windows
-};
-
-/** SYNC sub-states, mirroring the reference's SyncState enum. */
-enum frame_sync_subphase
-{
-    FS_NET_ID1 = 0,
-    FS_NET_ID2,
-    FS_DOWNCHIRP1,
-    FS_DOWNCHIRP2,
-    FS_QUARTER_DOWN,
-};
-
 /**
- * Frame synchronization state. One instance per input stream; opaque
- * beyond frame_sync.c/detect.c/sync.c except the documented configuration
- * and result fields.
+ * Opaque frame-sync state, one instance per input stream. The struct lives in
+ * src/frame_sync_internal.h, shared by frame_sync.c/detect.c/sync.c.
  */
-struct frame_sync_state
+struct frame_sync;
+
+/**
+ * Read-only copy of the configuration-derived and result fields, for the
+ * caller's logging and reporting. A snapshot of the live fields at the call;
+ * refresh it after a step whose results you want to read.
+ */
+struct frame_sync_status
 {
-    // configuration (constructor arguments in frame_sync_impl.cc)
-    uint8_t spreading_factor;    // spreading factor (7..12)
-    uint8_t oversampling_factor; // oversampling: samples per chip
-    uint16_t preamble_len;       // expected preamble upchirps
-    uint16_t sync_words[2];      // expected network-id symbols
-    uint32_t center_freq;        // RF center frequency, Hz (SFO estimate only);
-                                 // 0 disables the CFO->SFO inference
-    uint32_t bandwidth;          // chirp bandwidth, Hz (SFO estimate only)
-    uint32_t number_of_bins;     // N = 2^sf (FFT length, bins)
-    uint32_t samples_per_symbol; // N * os_factor (window length)
-    int n_up_req;                // stable windows required: len - 3
-    uint8_t detect_avg;          // DETECT: windows per averaged spectrum (1 = off)
+    // configuration-derived
+    int sf;                      // spreading factor
+    int os;                      // oversampling factor, samples per chip
+    uint32_t samples_per_symbol; // window length, N * os
+    uint32_t number_of_bins;     // N = 2^sf
+    uint32_t bandwidth;          // chirp bandwidth, Hz
 
-    // result fields
-    enum frame_sync_phase phase; // current state
-    int k_hat;                   // mode bin of the stable preamble run
-    int64_t coarse_consume;      // samples to advance after detection; negative
-                                 // when the sync word starts inside the fire
-                                 // window (see detect.c)
-    float cfo;                   // carrier-frequency offset, in FFT bins
-    float cfo_applied;           // how much of cfo the preamble buffers are already
-                                 // corrected by; the remainder applied once the
-                                 // whole-bin part arrives
-    float sfo_hat;               // sampling-frequency offset estimate
-    int netid_dec[2];            // net-id symbols after full correction
-    uint8_t sync_word_rx;        // 1-byte sync word rebuilt from the decoded pair
-    uint32_t consume;            // samples consumed by the last step
-    uint32_t symb_numb;          // total output windows incl. 8 header (caller-set)
-    int received_head;           // header decoded; unlocks the payload budget
+    // detection results, valid once frame_sync_detect_step() fired
+    int k_hat;    // mode bin of the stable preamble run
+    int n_up_req; // stable windows required: preamble_len - 3
 
-    // internal (m_* members of frame_sync_impl.cc)
-    int bin_idx;         // previous window's winning bin
-    int symbol_cnt;      // DETECT: stable windows; SYNC: sub-phase
-    float sto_frac;      // fractional STO estimate in bins
-    int cfo_est_done;    // SYNC: the estimators already ran
-    int down_val;        // SFD downchirp demod value
-    float sfo_cum;       // SFO sample-drift accumulator
-    int net_id_off;      // netid1 - sync_words[0], in [-2, 2]
-    int *preamb_up_vals; // bins of the current stable run
-    float complex *
-        detect_run_srcs; // DETECT: n_up_req copied windows, slot k at [k*samples_per_symbol] (see detect.c)
-    int additional_upchirps;          // extra preamble upchirps seen in SYNC
-    float complex *upchirp;           // reference upchirp, N-point
-    float complex *downchirp;         // reference downchirp, N-point
-    float complex *in_down;           // decimated decision window
-    float complex *out_win;           // SFO_COMPENSATION output window
-    float complex *preamble_raw;      // stable-run windows, decimated
-    float complex *net_id_samp;       // 2.5-symbol scratch around the sync word
-    float complex *preamble_upchirps; // CFO-corrected preamble copy
-    float complex *cfo_correc;        // N-point CFO correction vector
-    float complex *cfo_correc_aug;    // long correction vector (Bernier stage)
-    float complex *cfo_correc_long;   // long correction vector (post-SFD stage)
-    float complex *sfo_corr_vect;     // SFO correction vector
-    float complex *net_ids_samp_dec;  // decimated net-id pair, 2N
-    float complex *symb_corr;         // CFO-corrected decision window
-    float complex *rot_tmp;           // scratch for buffer rotations
-    void *fft_cfg;                    // N-point FFT plan (dsp.h)
-    void *est_fft_cfg;                // 2N-point FFT plan (dsp.h)
-    // estimator scratch
-    float complex *est_dechirped; // N-point dechirp buffer
-    dsp_cpx *est_cx_in;           // 2N-point FFT input
-    dsp_cpx *est_cx_out;          // 2N-point FFT output
-    float *est_fft_mag;           // 2N-point magnitude-squared spectrum
-    float complex *est_fft_val;   // per-window FFT rows, up_symb_to_use x N
-    int *est_k0;                  // per-window argmax
-    double *est_k0_mag;           // per-window argmax magnitude
-    // per-step scratch of get_symbol_val
-    dsp_cpx *cx_in;  // FFT input
-    dsp_cpx *cx_out; // FFT output
-    float *fft_mag;  // magnitude-squared spectrum
-    // DETECT averaging scratch (this port; unused when detect_avg <= 1)
-    float *detect_mag_hist;   // ring of the last detect_avg spectra
-    float *detect_mag_avg;    // their running mean, the decision spectrum
-    float *detect_mag_sum;    // sliding sum of the ring (resynced exactly)
-    uint8_t detect_hist_fill; // windows currently in the ring
-    uint8_t detect_hist_pos;  // next ring slot
-    uint32_t detect_win_cnt;  // windows since the last exact sum resync
+    // sync results, valid once frame_sync_sync_step() accepted
+    int down_val;           // SFD downchirp demod value
+    float cfo;              // carrier-frequency offset, in FFT bins
+    float sfo_hat;          // sampling-frequency offset estimate
+    float sto_frac;         // fractional sampling-time offset, in bins
+    int netid_dec[2];       // net-id symbols after full correction
+    uint16_t sync_words[2]; // expected network-id symbols
+    uint8_t sync_word_rx;   // 1-byte sync word rebuilt from the decoded pair
+
+    // state-machine progress, for trace logging
+    int symbol_cnt; // DETECT: stable windows; SYNC: sub-phase
+    int bin_idx;    // previous window's winning bin
 };
 
 /**
- * @brief Initialize the state and build the reference chirps.
+ * @brief Create the state and build the reference chirps.
  *
  * A single-byte sync word (e.g. 0x12) is expanded to the two network-id
  * symbols (nibble << 3); pass 0 to skip the check.
  *
- * @param[out] s state to initialize
- * @param[in] spreading_factor spreading factor (7..12)
+ * @param[in] spreading_factor spreading factor (5..12)
  * @param[in] oversampling_factor oversampling factor (samples per chip)
  * @param[in] preamble_len expected preamble upchirps (>= 6)
  * @param[in] sync_word network id to listen to in single-byte form (or 0, to disable)
@@ -138,12 +70,11 @@ struct frame_sync_state
  * @param[in] bandwidth chirp bandwidth in Hz (SFO estimate only)
  * @param[in] detect_avg average the magnitude spectra of this many consecutive
  *            DETECT windows before the bin decision (1 = off, values < 1 treated as 1)
- * @return 0 on success, -1 on allocation failure (stderr printed)
+ * @return the state, or NULL on allocation failure (stderr printed)
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:25; [gr-lora] demod_impl.cc:54.
  */
-int frame_sync_init(
-    struct frame_sync_state *s,
+struct frame_sync *frame_sync_create(
     uint8_t spreading_factor,
     uint8_t oversampling_factor,
     uint16_t preamble_len,
@@ -153,9 +84,75 @@ int frame_sync_init(
     uint8_t detect_avg);
 
 /**
- * @brief Release everything frame_sync_init() allocated.
+ * @brief Release everything frame_sync_create() allocated.
  */
-void frame_sync_cleanup(struct frame_sync_state *s);
+void frame_sync_destroy(struct frame_sync *fs);
+
+/**
+ * @brief Run one DETECT step over the next symbol window.
+ *
+ * @param[in] in window start; samples_per_symbol samples must be readable
+ * @param[out] advance on a fire: samples to skip to the first scanned window
+ *             (possibly negative; the sync word may start inside the fire
+ *             window), untouched otherwise
+ * @param[out] st optional: a status snapshot as of this step's return
+ * @return 1 when the detector fires, 0 while hunting, -1 on error
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:505-539; [gr-lora] demod_impl.cc:247.
+ */
+int frame_sync_detect_step(
+    struct frame_sync *fs, const float complex *in, int64_t *advance, struct frame_sync_status *st);
+
+/**
+ * @brief Run one SYNC step over the next symbol window.
+ *
+ * The first call runs the CFO/STO estimators on the buffered preamble; the
+ * walk then demodulates the two network-id symbols and the SFD downchirps,
+ * completes the CFO estimate, and checks the net ids against sync_words
+ * (offset +-2 tolerated, mirroring the reference).
+ *
+ * @param[in] in window start; 2 * samples_per_symbol samples must be readable
+ * @param[out] advance once the sync word is accepted: samples to the first
+ *             payload window; 0 while walking or on a mismatch
+ * @param[out] st optional: a status snapshot as of this step's return
+ * @return 1 once the sync word is accepted, 0 while walking, -1 on a
+ *         sync-word mismatch (the state resets to DETECT)
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:545; [gr-lora] demod_impl.cc:279.
+ */
+int frame_sync_sync_step(
+    struct frame_sync *fs,
+    const float complex *in,
+    uint32_t *advance,
+    struct frame_sync_status *st);
+
+/**
+ * @brief Produce the next SFO-corrected payload window for demodulation.
+ *
+ * The first 8 windows are the PHY header; further payload windows follow once
+ * the caller decoded the header and unlocked the budget with
+ * frame_sync_set_symbol_budget().
+ *
+ * @param[in] in window start; 2 * samples_per_symbol samples must be readable
+ * @param[out] advance samples to move past the returned window
+ * @param[out] st optional: a status snapshot as of this step's return
+ * @return the corrected window (valid until the next call), or NULL when the
+ *         symbol budget is spent
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:845.
+ */
+const float complex *frame_sync_output_step(
+    struct frame_sync *fs,
+    const float complex *in,
+    uint32_t *advance,
+    struct frame_sync_status *st);
+
+/**
+ * @brief Unlock a payload budget of @p symb_numb windows. Called once the
+ *        header block decoded; until then the output step yields only the
+ *        8 header windows.
+ */
+void frame_sync_set_symbol_budget(struct frame_sync *fs, uint32_t symb_numb);
 
 /**
  * @brief Rewind the state machine to DETECT for the next frame.
@@ -165,27 +162,11 @@ void frame_sync_cleanup(struct frame_sync_state *s);
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:874-880,404-411.
  */
-void frame_sync_reset_detect(struct frame_sync_state *s);
+void frame_sync_reset_detect(struct frame_sync *fs);
 
 /**
- * @brief Shared dechirp + N-point FFT + raw argmax: the bin of the tone
- *        in one decimated window, or -1 on a zero-energy window. Leaves the
- *        magnitude spectrum in s->fft_mag.
- *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:322; [gr-lora] demod_impl.cc:199-206.
+ * @brief Copy the current configuration and result fields into @p st.
  */
-int frame_sync_get_symbol_val(
-    struct frame_sync_state *s, const float complex *samples, const float complex *ref_chirp);
-
-/**
- * @brief Decimate one oversampled input window into dst
- *        (os_factor stride, sto_frac-corrected, os/2 phase). The dst
- *        parameter (a deviation) lets DETECT materialize preamble_raw
- *        lazily (detect.c).
- *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:499-501.
- */
-void frame_sync_downsample_prologue(
-    struct frame_sync_state *s, const float complex *in, float complex *dst);
+void frame_sync_status(const struct frame_sync *fs, struct frame_sync_status *st);
 
 #endif // FRAME_SYNC_H

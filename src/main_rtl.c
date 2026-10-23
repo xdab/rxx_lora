@@ -173,18 +173,9 @@ int main(int argc, char **argv)
             break;
         case 'v':
         case 'q':
-        {
             // -v/-v1/-v 1 and -q/-q1/-q 1
-            int n = 1;
-            if (optarg)
-                n = atoi(optarg);
-            else if (optind < argc && digits_only(argv[optind]))
-                n = atoi(argv[optind++]);
-            if (n < 1)
-                n = 1;
-            log_set_level(opt == 'v' ? LOG_INFO - (n > 2 ? 2 : n) : LOG_INFO + (n > 3 ? 3 : n));
+            log_verbosity_opt(opt, argc, argv);
             break;
-        }
         default:
             usage();
             return opt == 'h' ? 0 : 1;

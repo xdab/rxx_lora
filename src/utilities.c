@@ -67,25 +67,3 @@ int util_most_frequent(const int *arr, int n, uint32_t number_of_bins)
     free(hash);
     return res;
 }
-
-int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap)
-{
-    static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    if (!out || 4 * ((in_len + 2) / 3) + 1 > out_cap)
-        return -1;
-    size_t o = 0;
-    for (size_t i = 0; i < in_len; i += 3)
-    {
-        uint32_t v = (uint32_t)in[i] << 16;
-        if (i + 1 < in_len)
-            v |= (uint32_t)in[i + 1] << 8;
-        if (i + 2 < in_len)
-            v |= in[i + 2];
-        out[o++] = tab[(v >> 18) & 63];
-        out[o++] = tab[(v >> 12) & 63];
-        out[o++] = i + 1 < in_len ? tab[(v >> 6) & 63] : '=';
-        out[o++] = i + 2 < in_len ? tab[v & 63] : '=';
-    }
-    out[o] = '\0';
-    return 0;
-}

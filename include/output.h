@@ -37,4 +37,14 @@ struct output_record
  */
 void output_frame(const struct output_record *rec);
 
+/**
+ * @brief Encode a byte buffer as base64 into out, null-terminated.
+ *
+ * The output should be at least 4*(in_len+2)/3 + 1 bytes in size (including
+ * the terminator).
+ *
+ * @return 0 on success, -1 when out is NULL or out_cap is too small
+ */
+int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap);
+
 #endif // OUTPUT_H

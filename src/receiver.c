@@ -8,7 +8,6 @@
 #include "crc.h"
 #include "deinterleave.h"
 #include "demod.h"
-#include "detect.h"
 #include "dewhitening.h"
 #include "frame_sync.h"
 #include "hamming.h"
@@ -16,11 +15,10 @@
 #include "logging.h"
 #include "output.h"
 #include "source.h"
-#include "sync.h"
 #include "utilities.h"
 
 /*
- * The chain of docs/ca/03-chain.md, one function per stage:
+ * The chain, one function per stage:
  *
  *   detect_frame -> sync_frame -> decode_frame (header handshake inside)
  *
@@ -39,7 +37,7 @@
 
 struct receiver
 {
-    struct frame_sync_state fs;
+    struct frame_sync *fs;
     int sf;
 };
 
@@ -83,19 +81,22 @@ static void log_input_sample(struct source *src, size_t pos)
  */
 static int next_symbol(
     struct source *src,
-    struct frame_sync_state *fs,
+    struct frame_sync *fs,
     struct demod_state *fd,
     size_t *pos,
-    float *llr)
+    float *llr,
+    struct frame_sync_status *st)
 {
-    const float complex *w = source_window(src, *pos, *pos + fs->samples_per_symbol);
+    const float complex *w = source_window(src, *pos, *pos + st->samples_per_symbol);
+    uint32_t advance;
+    const float complex *out = w ? frame_sync_output_step(fs, w, &advance, st) : NULL;
 
-    if (!w || frame_sync_output_step(fs, w) != 0)
+    if (!out)
         return -1;
 
-    (void)demod_step(fd, fs->out_win); // hard value unused: soft only
+    (void)demod_step(fd, out); // hard value unused: soft only
     demod_soft_llrs(fd, llr);
-    *pos += fs->consume;
+    *pos += advance;
 
     return 0;
 }
@@ -164,22 +165,24 @@ static enum frame_decode finish_frame(
 /*
  * Decode one frame: header block -> handshake -> payload blocks.
  *
- * The header block unlocks the symbol budget (fs->symb_numb); everything
- * downstream — how many windows next_symbol may still produce — keys off it.
+ * The header block unlocks the symbol budget (frame_sync_set_symbol_budget);
+ * everything downstream — how many windows next_symbol may still produce —
+ * keys off it.
  */
 static enum frame_decode decode_frame(
     struct source *src,
-    struct frame_sync_state *fs,
+    struct frame_sync *fs,
     struct demod_state *fd,
     size_t *pos,
-    struct frame_result *out)
+    struct frame_result *out,
+    struct frame_sync_status *st)
 {
     float sllr[HEADER_SYMBOLS][MAX_SF];
     uint8_t hnib[MAX_SF], nibs[2 * MAX_BYTES + 4];
     uint32_t nnib = 0, needed, i;
     uint8_t cw_len, nb = 0;
     struct lora_header h;
-    const uint8_t sf = fs->spreading_factor;
+    const uint8_t sf = (uint8_t)st->sf;
     float snr_acc = 0; // header symbols' linear on-channel SNR estimates
 
     if (sf < 5 || sf > MAX_SF) // bounds the fixed-size stack blocks below
@@ -188,7 +191,7 @@ static enum frame_decode decode_frame(
     // header block: 8 symbols -> sf-2 codewords -> nibbles, soft
     for (i = 0; i < HEADER_SYMBOLS; i++)
     {
-        if (next_symbol(src, fs, fd, pos, sllr[i]) < 0)
+        if (next_symbol(src, fs, fd, pos, sllr[i], st) < 0)
         {
             log_warn("frame too short for the header\n");
             return DECODE_HEADER;
@@ -224,9 +227,8 @@ static enum frame_decode decode_frame(
     for (i = 5; i < (uint32_t)(sf - 2); i++)
         nibs[nnib++] = hnib[i];
 
-    // caller-side frame_info handshake: unlock the payload budget
-    fs->symb_numb = decode_symbol_budget(h.pay_len, h.cr, h.has_crc, sf);
-    fs->received_head = 1;
+    // caller-side handshake: unlock the payload budget
+    frame_sync_set_symbol_budget(fs, decode_symbol_budget(h.pay_len, h.cr, h.has_crc, sf));
 
     // payload blocks of cr+4 symbols -> sf nibbles each, soft-decoded
     cw_len = (uint8_t)(h.cr + 4);
@@ -236,7 +238,7 @@ static enum frame_decode decode_frame(
         uint8_t pnib[MAX_SF];
         int n;
 
-        if (next_symbol(src, fs, fd, pos, sllr[nb]) < 0)
+        if (next_symbol(src, fs, fd, pos, sllr[nb], st) < 0)
             break; // stream spent or budget spent
         if (++nb < cw_len)
             continue;
@@ -262,13 +264,15 @@ static enum frame_decode decode_frame(
  * network-id symbol and return 1. Returns 0 at end of stream, -1 on error.
  * The look-ahead source_advance() keeps the sync word's history readable.
  */
-static int detect_frame(struct source *src, struct frame_sync_state *fs, size_t *pos)
+static int
+detect_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_sync_status *st)
 {
     const float complex *w;
 
-    while ((w = source_window(src, *pos, *pos + fs->samples_per_symbol)))
+    while ((w = source_window(src, *pos, *pos + st->samples_per_symbol)))
     {
-        int ret = frame_sync_detect_step(fs, w);
+        int64_t advance = 0;
+        int ret = frame_sync_detect_step(fs, w, &advance, st);
 
         if (ret < 0)
         {
@@ -279,24 +283,24 @@ static int detect_frame(struct source *src, struct frame_sync_state *fs, size_t 
 
         if (ret > 0)
         {
-            /* items_to_consume = os*(N - k_hat) + (lead-1)*sps; negative when
-             * the sync word starts inside the fire window, clamped at 0 as in
+            /* advance = os*(N - k_hat) + (lead-1)*sps; negative when the
+             * sync word starts inside the fire window, clamped at 0 as in
              * the reference */
-            int64_t next = (int64_t)*pos + fs->coarse_consume;
+            int64_t next = (int64_t)*pos + advance;
 
             *pos = next > 0 ? (size_t)next : 0;
             log_debug(
                 "frame detected: k_hat=%d over %d windows -> coarse sync: "
                 "discard %lld samples (next symbol window at sample %zu)\n",
-                fs->k_hat,
-                fs->n_up_req,
-                (long long)fs->coarse_consume,
+                st->k_hat,
+                st->n_up_req,
+                (long long)advance,
                 *pos);
             log_input_sample(src, *pos);
             return 1;
         }
 
-        *pos += fs->samples_per_symbol; // DETECT consumes one window per step
+        *pos += st->samples_per_symbol; // DETECT consumes one window per step
         /* keep the declared look-ahead as history: the sync word can lie
          * up to SYNC_LOOKAHEAD windows behind the fire position */
         source_advance(src, *pos);
@@ -308,26 +312,28 @@ static int detect_frame(struct source *src, struct frame_sync_state *fs, size_t 
  * Walk SYNC's five sub-states; returns 1 when the sync word is accepted (and
  * *pos sits on the first payload window), 0 when rejected or out of stream.
  */
-static int sync_frame(struct source *src, struct frame_sync_state *fs, size_t *pos)
+static int
+sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_sync_status *st)
 {
     const float complex *w;
 
-    while ((w = source_window(src, *pos, *pos + 2 * fs->samples_per_symbol)))
+    while ((w = source_window(src, *pos, *pos + 2 * st->samples_per_symbol)))
     {
-        int ret = frame_sync_sync_step(fs, w);
+        uint32_t advance = 0;
+        int ret = frame_sync_sync_step(fs, w, &advance, st);
 
         if (ret > 0)
         {
-            *pos += fs->consume;
+            *pos += advance;
             log_info(
                 "sync word ok: netid=%d,%d  cfo=%+.3f bins (%.1f Hz) sfo=%+f  "
                 "sto_frac=%+f -> payload grid at sample %zu\n",
-                fs->netid_dec[0],
-                fs->netid_dec[1],
-                (double)fs->cfo,
-                (double)fs->cfo * fs->bandwidth / fs->number_of_bins,
-                fs->sfo_hat,
-                fs->sto_frac,
+                st->netid_dec[0],
+                st->netid_dec[1],
+                (double)st->cfo,
+                (double)st->cfo * st->bandwidth / st->number_of_bins,
+                (double)st->sfo_hat,
+                (double)st->sto_frac,
                 *pos);
             log_input_sample(src, *pos);
 
@@ -335,12 +341,11 @@ static int sync_frame(struct source *src, struct frame_sync_state *fs, size_t *p
                 "CFO: cfo=%+.4f bins (%.1f Hz) from SFD down_val=%d\n"
                 "CFO: payload grid shift = %d samples (= %+.4f chips, "
                 "1 chip per bin)\n",
-                (double)fs->cfo,
-                (double)fs->cfo * fs->bandwidth / fs->number_of_bins,
-                fs->down_val,
-                (int)fs->consume - (int)fs->samples_per_symbol / 4,
-                (double)((int)fs->consume - (int)fs->samples_per_symbol / 4) /
-                    (double)(int)fs->oversampling_factor);
+                (double)st->cfo,
+                (double)st->cfo * st->bandwidth / st->number_of_bins,
+                st->down_val,
+                (int)advance - (int)st->samples_per_symbol / 4,
+                (double)((int)advance - (int)st->samples_per_symbol / 4) / (double)st->os);
 
             return 1;
         }
@@ -349,10 +354,10 @@ static int sync_frame(struct source *src, struct frame_sync_state *fs, size_t *p
         {
             log_debug(
                 "sync failed: netid1=%d netid2=%d (want %d,%d)\n",
-                fs->netid_dec[0],
-                fs->netid_dec[1],
-                fs->sync_words[0],
-                fs->sync_words[1]);
+                st->netid_dec[0],
+                st->netid_dec[1],
+                st->sync_words[0],
+                st->sync_words[1]);
 
             return 0;
         }
@@ -361,9 +366,9 @@ static int sync_frame(struct source *src, struct frame_sync_state *fs, size_t *p
             "sync step pos=%zu (input %zu) cnt=%d bin=%d\n",
             *pos,
             source_input_sample(src, *pos),
-            fs->symbol_cnt,
-            fs->bin_idx);
-        *pos += fs->samples_per_symbol; // SYNC consumes one window per step
+            st->symbol_cnt,
+            st->bin_idx);
+        *pos += st->samples_per_symbol; // SYNC consumes one window per step
     }
     return 0;
 }
@@ -373,7 +378,7 @@ static int sync_frame(struct source *src, struct frame_sync_state *fs, size_t *p
 static void report_frame(
     const struct frame_result *res,
     enum frame_decode verdict,
-    const struct frame_sync_state *fs,
+    const struct frame_sync_status *st,
     struct source *src,
     size_t pos)
 {
@@ -386,12 +391,12 @@ static void report_frame(
     rec.cr = res->cr;
     rec.crc_present = res->has_crc;
     rec.crc_valid = verdict == DECODE_CRC_OK ? 1 : (verdict == DECODE_CRC_BAD ? 0 : -1);
-    rec.net0 = fs->netid_dec[0];
-    rec.net1 = fs->netid_dec[1];
-    rec.sync_word = fs->sync_word_rx;
-    rec.cfo_hz = (double)fs->cfo * fs->bandwidth / (double)fs->number_of_bins;
-    rec.sfo = (double)fs->sfo_hat;
-    rec.sto_frac = (double)fs->sto_frac;
+    rec.net0 = st->netid_dec[0];
+    rec.net1 = st->netid_dec[1];
+    rec.sync_word = st->sync_word_rx;
+    rec.cfo_hz = (double)st->cfo * st->bandwidth / (double)st->number_of_bins;
+    rec.sfo = (double)st->sfo_hat;
+    rec.sto_frac = (double)st->sto_frac;
     rec.input_sample = source_input_sample(src, pos);
     rec.time_seconds = source_time_seconds(src, pos);
 
@@ -423,15 +428,15 @@ struct receiver *receiver_create(
         return NULL;
 
     r->sf = sf;
-    if (frame_sync_init(
-            &r->fs,
-            (uint8_t)sf,
-            (uint8_t)os,
-            (uint16_t)preamble_avg,
-            sync_word,
-            center_freq,
-            bandwidth,
-            (uint8_t)detect_avg) < 0)
+    r->fs = frame_sync_create(
+        (uint8_t)sf,
+        (uint8_t)os,
+        (uint16_t)preamble_avg,
+        (uint32_t)sync_word,
+        (uint32_t)center_freq,
+        (uint32_t)bandwidth,
+        (uint8_t)detect_avg);
+    if (!r->fs)
     {
         free(r);
         return NULL;
@@ -444,13 +449,14 @@ void receiver_destroy(struct receiver *r)
 {
     if (!r)
         return;
-    frame_sync_cleanup(&r->fs);
+    frame_sync_destroy(r->fs);
     free(r);
 }
 
 int receiver_run(struct receiver *r, struct source *src)
 {
-    struct frame_sync_state *fs = &r->fs;
+    struct frame_sync *fs = r->fs;
+    struct frame_sync_status st;
     struct frame_result res;
 
     // Frame detect statistics
@@ -458,12 +464,14 @@ int receiver_run(struct receiver *r, struct source *src)
     int n_crc_ok = 0, n_crc_bad = 0, n_crc_absent = 0;
     int n_header_fail = 0, n_truncated = 0;
 
+    frame_sync_status(fs, &st); // one snapshot, kept fresh by every step below
+
     size_t pos = 0;
     size_t lock_pos = 0; // frame start: where DETECT fired
     for (;;)
     {
         size_t frame_pos = pos;
-        int detected = detect_frame(src, fs, &pos);
+        int detected = detect_frame(src, fs, &pos, &st);
 
         if (detected < 0)
             goto done;
@@ -472,19 +480,19 @@ int receiver_run(struct receiver *r, struct source *src)
         n_locks++;
         lock_pos = pos;
 
-        if (sync_frame(src, fs, &pos))
+        if (sync_frame(src, fs, &pos, &st))
         {
             n_synced++;
 
             struct demod_state fd;
-            int ret = demod_init(&fd, (uint8_t)r->sf, fs->cfo);
+            int ret = demod_init(&fd, (uint8_t)r->sf, st.cfo);
             if (ret < 0)
             {
                 log_error("demod init failed\n");
                 goto done;
             }
 
-            enum frame_decode verdict = decode_frame(src, fs, &fd, &pos, &res);
+            enum frame_decode verdict = decode_frame(src, fs, &fd, &pos, &res, &st);
             demod_cleanup(&fd);
 
             switch (verdict)
@@ -492,16 +500,16 @@ int receiver_run(struct receiver *r, struct source *src)
             case DECODE_CRC_OK:
                 n_crc_ok++;
                 n_decoded++;
-                report_frame(&res, verdict, fs, src, lock_pos);
+                report_frame(&res, verdict, &st, src, lock_pos);
                 break;
             case DECODE_NO_CRC:
                 n_crc_absent++;
                 n_decoded++;
-                report_frame(&res, verdict, fs, src, lock_pos);
+                report_frame(&res, verdict, &st, src, lock_pos);
                 break;
             case DECODE_CRC_BAD:
                 n_crc_bad++;
-                report_frame(&res, verdict, fs, src, lock_pos);
+                report_frame(&res, verdict, &st, src, lock_pos);
                 break;
             case DECODE_HEADER:
                 n_header_fail++;
@@ -516,7 +524,7 @@ int receiver_run(struct receiver *r, struct source *src)
         // a rejected frame consumed nothing
         frame_sync_reset_detect(fs);
         if (pos <= frame_pos)
-            pos = frame_pos + fs->samples_per_symbol;
+            pos = frame_pos + st.samples_per_symbol;
         source_advance(src, pos);
     }
 
