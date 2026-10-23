@@ -32,18 +32,28 @@ struct demod_state
 };
 
 /**
- * @brief Initialize the demodulator and build the CFO-adapted reference: the
- *        offset's rounded part becomes a cyclic shift, its fraction a
- *        per-sample twist of the downchirp.
+ * @brief Allocate the demodulator's buffers and FFT plan; call once per run.
+ *
+ *        Leaves the reference chirps CFO-neutral (as if cfo were 0); call
+ *        demod_reset() with the frame's CFO before demodulating it.
  *
  * @param[out] s state to initialize
  * @param[in] sf spreading factor 7..12
- * @param[in] cfo carrier-frequency offset in FFT bins
  * @return 0 on success, -1 on allocation failure
  *
  * Reference: [gr-lora_sdr] fft_demod_impl.cc:26,283-289; [gr-lora] demod_impl.cc:54.
  */
-int demod_init(struct demod_state *s, uint8_t sf, float cfo);
+int demod_init(struct demod_state *s, uint8_t sf);
+
+/**
+ * @brief Rebuild the CFO-adapted reference chirps for an incoming frame; call
+ *        once per frame, after sync produced its CFO estimate. Allocates
+ *        nothing, so it cannot fail.
+ *
+ * @param[in,out] s state from demod_init()
+ * @param[in] cfo carrier-frequency offset in FFT bins
+ */
+void demod_reset(struct demod_state *s, float cfo);
 
 /**
  * @brief Release everything demod_init() allocated.

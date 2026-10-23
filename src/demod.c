@@ -10,12 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Reference: [gr-lora_sdr] fft_demod_impl.cc:26,283-289; [gr-lora] demod_impl.cc:54,96-101.
- *
- * cfo arrives as one value in bins and is split here: the upchirp rotation is
- * a whole-sample cyclic shift, so it takes the rounded part, and the leftover
- * fraction becomes a per-sample phase twist. */
-int demod_init(struct demod_state *s, uint8_t sf, float cfo)
+/* Reference: [gr-lora_sdr] fft_demod_impl.cc:26,283-289; [gr-lora] demod_impl.cc:54,96-101. */
+int demod_init(struct demod_state *s, uint8_t sf)
 {
     memset(s, 0, sizeof(*s));
     s->spreading_factor = sf;
@@ -34,17 +30,6 @@ int demod_init(struct demod_state *s, uint8_t sf, float cfo)
         return -1;
     }
 
-    int cfo_bins = util_round(cfo);
-    float cfo_rest = cfo - (float)cfo_bins;
-
-    util_build_upchirp(s->upchirp, util_mod(cfo_bins, (long)s->number_of_bins), sf, 1);
-    for (uint32_t n = 0; n < s->number_of_bins; n++)
-        s->downchirp[n] = conjf(s->upchirp[n]);
-
-    for (uint32_t n = 0; n < s->number_of_bins; n++)
-        s->downchirp[n] *=
-            cexpf(I * (-2.0f * (float)M_PI * cfo_rest / (float)s->number_of_bins * (float)n));
-
     s->fft_cfg = dsp_fft_alloc((int)s->number_of_bins);
     if (!s->fft_cfg)
     {
@@ -53,13 +38,34 @@ int demod_init(struct demod_state *s, uint8_t sf, float cfo)
         return -1;
     }
 
+    demod_reset(s, 0.0f);
+    return 0;
+}
+
+/* Reference: [gr-lora_sdr] fft_demod_impl.cc:26,283-289; [gr-lora] demod_impl.cc:54,96-101.
+ *
+ * cfo arrives as one value in bins and is split here: the upchirp rotation is
+ * a whole-sample cyclic shift, so it takes the rounded part, and the leftover
+ * fraction becomes a per-sample phase twist. */
+void demod_reset(struct demod_state *s, float cfo)
+{
+    int cfo_bins = util_round(cfo);
+    float cfo_rest = cfo - (float)cfo_bins;
+
+    util_build_upchirp(
+        s->upchirp, util_mod(cfo_bins, (long)s->number_of_bins), s->spreading_factor, 1);
+    for (uint32_t n = 0; n < s->number_of_bins; n++)
+        s->downchirp[n] = conjf(s->upchirp[n]);
+
+    for (uint32_t n = 0; n < s->number_of_bins; n++)
+        s->downchirp[n] *=
+            cexpf(I * (-2.0f * (float)M_PI * cfo_rest / (float)s->number_of_bins * (float)n));
+
     log_trace(
         "demod LO: cfo=%+.4f bins -> rotate(%d) + twist(%+.4f)\n",
         (double)cfo,
         cfo_bins,
         (double)cfo_rest);
-
-    return 0;
 }
 
 // Reference: [gr-lora_sdr] fft_demod_impl.cc:62; [gr-lora] demod_impl.cc:109

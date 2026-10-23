@@ -37,6 +37,7 @@
 struct receiver
 {
     struct frame_sync *fs;
+    struct demod_state demod; // allocated once, reset per frame
     int sf;
 };
 
@@ -437,6 +438,13 @@ struct receiver *receiver_create(
         return NULL;
     }
 
+    if (demod_init(&r->demod, (uint8_t)sf) < 0)
+    {
+        frame_sync_destroy(r->fs);
+        free(r);
+        return NULL;
+    }
+
     return r;
 }
 
@@ -444,6 +452,7 @@ void receiver_destroy(struct receiver *r)
 {
     if (!r)
         return;
+    demod_cleanup(&r->demod);
     frame_sync_destroy(r->fs);
     free(r);
 }
@@ -479,16 +488,8 @@ int receiver_run(struct receiver *r, struct source *src)
         {
             n_synced++;
 
-            struct demod_state fd;
-            int ret = demod_init(&fd, (uint8_t)r->sf, st.cfo);
-            if (ret < 0)
-            {
-                log_error("demod init failed\n");
-                goto done;
-            }
-
-            enum frame_decode verdict = decode_frame(src, fs, &fd, &pos, &res, &st);
-            demod_cleanup(&fd);
+            demod_reset(&r->demod, st.cfo);
+            enum frame_decode verdict = decode_frame(src, fs, &r->demod, &pos, &res, &st);
 
             switch (verdict)
             {
