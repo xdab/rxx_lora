@@ -1,5 +1,7 @@
 # rxx_lora
 
+[![CI](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml/badge.svg)](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml)
+
 A plug-and-play RTL-SDR **[LoRa](https://lora-alliance.org/)** receiver in the spirit of
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
 USB dongle in, decoded packets out, no GNU Radio.

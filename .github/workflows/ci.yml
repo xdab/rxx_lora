@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev
+          pip install numpy
+
+      - name: Build bin/file_lora
+        run: make bin/file_lora
+
+      # Generated frames + AWGN; section 3 (real data/ captures) is local-only
+      - name: Regression
+        run: python3 tools/regression.py --no-capture
+
+  fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+          pip install ruff
+
+      - name: Style check
+        run: make fmt-check
