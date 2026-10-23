@@ -22,15 +22,17 @@ __pycache__/
 *.a
 *.so
 
-# Raw data files, plots
+# Data files
+data/
 *.raw
 *.cf32
 *.f32
-*.png
 *.wav
 *.tmp
 *.json
 
+# Plots except for doc embeding
+*.png
 !img/*.png
 
 # Performance profiling outputs
@@ -39,3 +41,6 @@ massif.out*
 
 # Generated API docs
 docs/doxygen/
+
+# Local TODO notes
+TODOS.md
