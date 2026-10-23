@@ -1,0 +1,38 @@
+# Python style for tools/. One file, both formatters: the VS Code Black
+# extension (ms-python.black-formatter) reads [tool.black], `ruff format` reads
+# [tool.ruff]. Black and ruff-format are output-compatible, so declaring the
+# same number twice is what makes "format on save" and `make fmt` agree instead
+# of fighting each other.
+#
+# Why 100 and not Black's stock 88: .clang-format already sets ColumnLimit 100
+# for the C side, and 88 is what forces long annotated signatures to explode
+# one-argument-per-line. At 100 they fit on a single continuation line.
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+# No magic trailing comma: without this, one trailing comma in the source pins
+# a call/array open across 20 lines forever, whatever the line budget. With it,
+# entries stay packed on one line until the 100th column, which is the point.
+skip-magic-trailing-comma = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+# The harness runs scripts as `python3 tools/x.py` and parses the child's
+# stdout/returncode itself (regression.py's sh(), the BER arms), so neither
+# rule describes the code. Everything else in ruff's default set is enforced.
+ignore = [
+    "EXE001", # shebang on a non-executable file — the tools are run via python3
+    "PLW1510", # subprocess.run without check= — every caller checks returncode itself
+]
+
+[tool.ruff.lint.isort]
+# Required by the formatter choice above; keeps `ruff check` from re-splitting
+# imports the formatter just packed onto one line.
+split-on-trailing-comma = false

@@ -41,9 +41,6 @@ massif.out*
 # Generated API docs
 docs/doxygen/
 
-# Tool-generated guidebook and figures
-docs/ca/_pdf/
-docs/ca/figs/
 
 # Test data and it's previews (LFS)
 !data/*/*.cf32
