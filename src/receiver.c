@@ -8,14 +8,13 @@
 #include "crc.h"
 #include "deinterleave.h"
 #include "demod.h"
-#include "dewhitening.h"
+#include "dewhiten.h"
 #include "frame_sync.h"
 #include "hamming.h"
 #include "header.h"
 #include "logging.h"
 #include "output.h"
 #include "source.h"
-#include "utilities.h"
 
 /*
  * The chain, one function per stage:
@@ -131,17 +130,13 @@ static int decode_block(const float (*sym_llr)[MAX_SF], int n_sym, int n_cw, int
 static enum frame_decode finish_frame(
     const uint8_t *nibs, uint32_t nnib, const struct lora_header *h, struct frame_result *out)
 {
-    uint32_t i, p;
+    uint32_t p;
     uint16_t crc_rx, crc_calc;
 
     if (nnib < 2u * h->pay_len + (h->has_crc ? 4u : 0u))
         return DECODE_TRUNCATED;
 
-    // dewhitening: low nibble first, CRC nibbles raw
-    // ([gr-lora_sdr] dewhitening_impl.cc:96-98)
-    for (i = 0; i < h->pay_len; i++)
-        out->bytes[i] = (uint8_t)(((nibs[2 * i + 1] ^ (whitening_seq[i] >> 4)) << 4) |
-                                  (nibs[2 * i] ^ (whitening_seq[i] & 0x0F)));
+    dewhiten(nibs, h->pay_len, out->bytes); // payload nibbles only: CRC nibbles stay raw
 
     out->len = h->pay_len;
     out->has_crc = h->has_crc;
