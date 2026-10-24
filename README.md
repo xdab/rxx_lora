@@ -1,6 +1,7 @@
 # rxx_lora
 
 [![CI](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml/badge.svg)](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
 A plug-and-play RTL-SDR **[LoRa](https://lora-alliance.org/)** receiver in the spirit of
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
