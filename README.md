@@ -1,5 +1,7 @@
 [![CI](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml/badge.svg)](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-13C3FF?logo=kofi&logoColor=white)](https://ko-fi.com/xdabx)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/xdab)
 
 # rxx_lora
 
