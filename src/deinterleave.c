@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 void deinterleave_soft(
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors [gr-lora_sdr]
     const float (*sym_llr)[12],
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors [gr-lora_sdr]
     uint8_t cw_len,
     uint8_t sf_app,
     float (*cw_out)[12])
