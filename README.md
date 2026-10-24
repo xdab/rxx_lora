@@ -5,9 +5,10 @@
 
 # rxx_lora
 
-A plug-and-play RTL-SDR **[LoRa](https://lora-alliance.org/)** receiver in the spirit of
+A plug-and-play **[LoRa](https://lora-alliance.org/)** receiver for RTL-SDR dongles and
+SDRplay RSPs in the spirit of
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
-USB dongle in, decoded packets out, no GNU Radio.
+SDR in, decoded packets out, no GNU Radio.
 
 | Packets from an I/Q capture file                                   | Meshtastic frames from an RTL-SDR                                     |
 | ------------------------------------------------------------------ | --------------------------------------------------------------------- |
@@ -27,10 +28,13 @@ Naturally, the likes of `librtlsdr` are unavoidable if support for the actual de
   - Debian/Ubuntu: `libfftw3-dev`
   - Fedora: `fftw` `fftw-devel`
   - Arch: `fftw`
-- [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers:
+- [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers (for `rtl_lora`):
   - Debian/Ubuntu: `librtlsdr0` `librtlsdr-dev`
   - Fedora: `rtl-sdr` `rtl-sdr-devel`
   - Arch: `rtl-sdr`
+- [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers (for `rsp_lora`;
+  Linux only, and its `sdrplay_apiService` daemon must be running):
+  - all distros: the vendor's `.run` installer
 - (Optional) `clang-format` formatter:
   - Debian/Ubuntu: `clang-format`
   - Fedora: `clang-tools-extra`
@@ -62,12 +66,16 @@ python3 tools/regression_perf.py
 make help
 file_lora -h
 rtl_lora -h
+rsp_lora -h
 
 # Processing a captured I/Q file -> JSONL file
 file_lora -w 0 -s7 -o4 --center-freq 868e6 --bw 125e3 --input-rate 1.024e6 capture_o4.cf32 1>packets.jsonl
 
 # RTL-SDR, Meshtastic MediumFast -> console
 rtl_lora -w 0x2b -s9 -o8 --center-freq 869.525e6 --bw 125e3 --input-rate 1.024e6 capture_o4.cf32 -q2
+
+# SDRplay RSP, same channel -> console (capture rate snaps to the API's 2 MS/s)
+rsp_lora -w 0x2b -s9 -o8 --center-freq 869.525e6 --bw 125e3
 
 # Python tool using rtl_lora, decoding Meshtastic frames 
 python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4

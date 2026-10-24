@@ -13,7 +13,7 @@ Those are usually worth reading in case you need something from there, and in th
 ## Repo architecture
 
 Sources live in `src/`, headers in `include/`, as `X.c`/`X.h` pairs; we call them modules.
-There's one binary per entry point (`bin/file_lora`, `bin/rtl_lora`) - each links the shared core
+There's one binary per entry point (`bin/file_lora`, `bin/rtl_lora`, `bin/rsp_lora`) - each links the shared core
 but has its own `main_*.c` (usage, preparation) and `device_*.c` (driving the input: file or device).
 
 Each input kind is a pull-only cf32 producer behind `include/device.h`
@@ -23,7 +23,8 @@ Each input kind is a pull-only cf32 producer behind `include/device.h`
 and presents windows by absolute sample position;
 
 `receiver.c` is the device-agnostic DETECT > SYNC > payload chain.
-Devices shouldn't push — a push front end (librtlsdr's async callback) stays hidden (like in `device_rtl.c`).
+Devices shouldn't push — a push front end (librtlsdr's async callback, the SDRplay API's
+stream/event callbacks) stays hidden in its `device_*.c` (like in `device_rtl.c`).
 
 `tools/` is the Python toolkit around the receiver: frame/IQ builders and
 channel simulators, and the regression gates. `tools/README.md` has a finer index.

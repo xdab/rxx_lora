@@ -35,6 +35,17 @@ struct device *device_open_rtl(
     int biastee,
     const char *record_path);
 
+/**
+ * Open an SDRplay RSP via the SDRplay API v3 service.
+ */
+struct device *device_open_rsp(
+    const char *selector,
+    double center_hz,
+    double capture_hz,
+    int gain_rdb,
+    int lna_state,
+    const char *record_path);
+
 static inline double device_rate(const struct device *d) { return d->ops->rate(d); }
 
 static inline size_t device_read(struct device *d, float complex *out, size_t n)

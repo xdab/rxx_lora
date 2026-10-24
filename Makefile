@@ -3,6 +3,7 @@ CC := gcc
 CFLAGS := -O3 -march=native -mtune=native -Wall -Wextra -I./include
 LIBS := -lpthread -lm -lfftw3f
 RTL_LIBS := -lrtlsdr
+RSP_LIBS := -lsdrplay_api
 
 # Directories: flat src/; one entry point and one device per input kind
 SRC_DIR := src
@@ -28,20 +29,21 @@ endif
 
 # Sources: the entry points and device backends are per-binary, everything
 # else is shared core
-ENTRY_SRC := $(SRC_DIR)/main_file.c $(SRC_DIR)/main_rtl.c
-DEV_SRC := $(SRC_DIR)/device_file.c $(SRC_DIR)/device_rtl.c
+ENTRY_SRC := $(SRC_DIR)/main_file.c $(SRC_DIR)/main_rtl.c $(SRC_DIR)/main_rsp.c
+DEV_SRC := $(SRC_DIR)/device_file.c $(SRC_DIR)/device_rtl.c $(SRC_DIR)/device_rsp.c
 CORE_SRC := $(filter-out $(ENTRY_SRC) $(DEV_SRC), $(wildcard $(SRC_DIR)/*.c))
 CORE_OBJ := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(CORE_SRC))
 
 FILE_BIN := $(BIN_DIR)/file_lora$(TARGET_SUFFIX)
 RTL_BIN := $(BIN_DIR)/rtl_lora$(TARGET_SUFFIX)
+RSP_BIN := $(BIN_DIR)/rsp_lora$(TARGET_SUFFIX)
 
 # All C sources + compile database path (make compdb regenerates it)
 SOURCES := $(wildcard $(SRC_DIR)/*.c)
 COMPDB := compile_commands.json
 
 .PHONY: all
-all: $(FILE_BIN) $(RTL_BIN)
+all: $(FILE_BIN) $(RTL_BIN) $(RSP_BIN)
 
 # Create necessary directories
 $(OBJ_DIR) $(BIN_DIR):
@@ -61,6 +63,11 @@ $(RTL_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_rtl.o $(OBJ_DIR)/device_rtl.o | $(BIN_DI
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) $(RTL_LIBS)
 	@echo "✓ Build successful: $@"
 
+# Link the RSP binary: shared core + its entry point + its device
+$(RSP_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_rsp.o $(OBJ_DIR)/device_rsp.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) $(RSP_LIBS)
+	@echo "✓ Build successful: $@"
+
 # Installation (PREFIX and DESTDIR follow GNU conventions; DESTDIR is meant
 # for staging to a package root, e.g. make install DESTDIR=/tmp/pkg)
 PREFIX ?= /usr/local
@@ -69,8 +76,8 @@ BINDIR := $(PREFIX)/bin
 .PHONY: install
 install: all
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 755 $(FILE_BIN) $(RTL_BIN) $(DESTDIR)$(BINDIR)
-	@[ -z '$(TARGET_SUFFIX)' ] || for b in file_lora rtl_lora; do \
+	install -m 755 $(FILE_BIN) $(RTL_BIN) $(RSP_BIN) $(DESTDIR)$(BINDIR)
+	@[ -z '$(TARGET_SUFFIX)' ] || for b in file_lora rtl_lora rsp_lora; do \
 		mv $(DESTDIR)$(BINDIR)/$$b$(TARGET_SUFFIX) $(DESTDIR)$(BINDIR)/$$b; \
 	done
 	@echo "✓ Installed to $(DESTDIR)$(BINDIR)"
@@ -138,11 +145,16 @@ fmt-check:
 # Static analysis gate (clang-tidy; check set in .clang-tidy at repo root).
 # Findings exit nonzero, like fmt-check. The compdb prerequisite keeps the
 # compile database fresh; clang-tidy only parses (needs headers, not libs).
+# The RSP pair is out of the gate: it needs the SDRplay API header, which CI
+# doesn't install (same scope decision as rxx_multi; compdb still lists the
+# files so clangd picks them up where the header exists).
+TIDY_SRCS := $(filter-out $(SRC_DIR)/main_rsp.c $(SRC_DIR)/device_rsp.c, $(SOURCES))
+
 .PHONY: tidy
 tidy: compdb
 	@command -v clang-tidy >/dev/null 2>&1 || { \
 		echo "ERROR: clang-tidy not installed (Arch: sudo pacman -S clang)"; exit 1; }
-	clang-tidy -p . $(SOURCES) --warnings-as-errors=*
+	clang-tidy -p . $(TIDY_SRCS) --warnings-as-errors=*
 
 # API docs (Doxyfile at repo root; output in docs/doxygen/html)
 .PHONY: doc
@@ -157,8 +169,8 @@ doc:
 help:
 	@echo "rxx_lora Makefile Targets"
 	@echo "========================"
-	@echo "  all         - Build bin/file_lora (default)"
-	@echo "  install     - Install bin/file_lora and bin/rtl_lora to $(BINDIR)"
+	@echo "  all         - Build bin/file_lora, bin/rtl_lora, bin/rsp_lora (default)"
+	@echo "  install     - Install all three binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
 	@echo "  experimental - Build *.exp binaries with the RXX_EXPERIMENTAL hooks compiled in"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
