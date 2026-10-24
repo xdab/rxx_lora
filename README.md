@@ -1,7 +1,7 @@
-# rxx_lora
-
 [![CI](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml/badge.svg)](https://github.com/xdab/rxx_lora/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+
+# rxx_lora
 
 A plug-and-play RTL-SDR **[LoRa](https://lora-alliance.org/)** receiver in the spirit of
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
@@ -79,7 +79,7 @@ For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.
 
 | BER vs SNR under AWGN                                             |
 | ----------------------------------------------------------------- |
-| <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="400"/> |
+| <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="600"/> |
 
 Information regarding the used theoretical curves can be found under [docs/ber-theory](docs/ber-theory.md).
 
