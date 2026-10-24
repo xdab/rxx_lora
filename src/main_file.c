@@ -1,5 +1,4 @@
-#include <complex.h>
-#include <getopt.h>
+#include <getopt.h> // NOLINT(misc-include-cleaner)
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -16,7 +15,7 @@
 
 static void usage(void)
 {
-    fprintf(
+    (void)fprintf(
         stderr,
         APP_NAME ", a LoRa (CSS) decoder for cf32 IQ recordings\n"
                  "\n"
@@ -82,16 +81,16 @@ int main(int argc, char **argv)
         switch (opt)
         {
         case 's':
-            sf = atoi(optarg);
+            sf = (int)strtol(optarg, NULL, 10);
             break;
         case 'o':
-            os = atoi(optarg);
+            os = (int)strtol(optarg, NULL, 10);
             break;
         case 'p':
-            preamble_avg = atoi(optarg);
+            preamble_avg = (int)strtol(optarg, NULL, 10);
             break;
         case 'a':
-            detect_avg = atoi(optarg);
+            detect_avg = (int)strtol(optarg, NULL, 10);
             break;
         case 'w':
             sync_word_filter = (long)strtoul(optarg, NULL, 0);
@@ -103,13 +102,13 @@ int main(int argc, char **argv)
             dc_block = 1;
             break;
         case OPT_CENTER_FREQ:
-            center_freq = atof(optarg);
+            center_freq = strtod(optarg, NULL);
             break;
         case OPT_BW:
-            bandwidth = atof(optarg);
+            bandwidth = strtod(optarg, NULL);
             break;
         case OPT_INPUT_RATE:
-            input_rate = atof(optarg);
+            input_rate = strtod(optarg, NULL);
             break;
         case 'v':
         case 'q':
@@ -158,7 +157,7 @@ int main(int argc, char **argv)
     // size gives the count of complex samples the file holds
     struct stat st;
     long file_bytes = (stat(file_path, &st) == 0) ? (long)st.st_size : 0;
-    long est = file_bytes / (2 * sizeof(float));
+    long est = (long)(file_bytes / (2 * sizeof(float)));
     log_info(
         "%s: %s  SF=%d os=%d pre=%d avg=%d  ~%ld input samples\n",
         APP_NAME,

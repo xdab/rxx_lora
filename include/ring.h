@@ -41,9 +41,10 @@ void ring_write(struct ring *r, const float complex *in, size_t n);
 void ring_drop(struct ring *r, size_t n);
 
 /**
- * Contiguous view of n samples starting at offset off from the oldest
- * (off + n <= ring_len). Valid until the next reserve/write/drop.
+ * Contiguous view of the samples starting at offset off from the oldest
+ * (the caller bounds its reads by ring_len() - off). Valid until the next
+ * reserve/write/drop.
  */
-const float complex *ring_peek(const struct ring *r, size_t off, size_t n);
+const float complex *ring_peek(const struct ring *r, size_t off);
 
 #endif // RING_H

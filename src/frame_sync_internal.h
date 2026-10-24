@@ -18,7 +18,7 @@ enum frame_sync_phase
 {
     FS_DETECT = 0, // sliding decision windows, hunting stable bins
     FS_SYNC = 1,   // frame found; estimating and checking the sync word
-    FS_SFO_COMP,   // locked; producing corrected payload windows
+    FS_SFO_COMP = 2, // locked; producing corrected payload windows
 };
 
 /** SYNC sub-states, mirroring the reference's SyncState enum. */

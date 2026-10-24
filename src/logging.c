@@ -35,8 +35,8 @@ static void vlog(enum log_level lvl, const char *fmt, va_list ap)
 {
     if (lvl < threshold)
         return;
-    fputs(level_prefix(lvl), stderr);
-    vfprintf(stderr, fmt, ap);
+    (void)fputs(level_prefix(lvl), stderr);
+    (void)vfprintf(stderr, fmt, ap);
 }
 
 void log_set_level(enum log_level level) { threshold = level; }

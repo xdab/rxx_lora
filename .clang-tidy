@@ -1,0 +1,26 @@
+# clang-tidy check set, run by `make tidy` (the commit gate) - see AGENTS.md.
+# Findings are triaged one by one: fix the code, or a // NOLINT(check) at the
+# site. No check-wide disables here without an attached reason.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-signed-bitwise,
+  cert-*,
+  misc-*,
+  readability-function-size,
+  readability-inconsistent-declaration-parameter-name,
+  readability-suspicious-call-argument
+CheckOptions:
+  # glibc's public headers (getopt.h, time.h, pthread.h) are thin wrappers
+  # over bits/ internals, but include-cleaner can't walk up to the public
+  # header and suggests the non-self-contained bits/ files directly. Never
+  # suggest those; where the public header still trips the check, a
+  # // NOLINT(misc-include-cleaner) sits on the include line.
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: 'bits/.*'
+# bugprone-signed-bitwise is off: the codebase bit-packs demodulated nibbles
+# and CRC/Hamming words on `int` (C integer promotion makes `uint8_t << 4`
+# signed regardless of the operand types). The check targets C++ signed
+# shift/mask overflow; in C these operations are well-defined at the magnitudes
+# used, and qualifying all 130 sites unsigned would be churn without safety.
+# If a bitwise bug is ever suspected, re-enable the check and triage afresh.

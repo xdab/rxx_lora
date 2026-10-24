@@ -11,6 +11,7 @@
 
 #include "dsp.h"
 
+#include <complex.h>
 #include <fftw3.h>
 #include <math.h>
 #include <stdlib.h>
@@ -103,7 +104,7 @@ static float sinc_pi(float x)
 {
     if (fabsf(x) < 0.01f)
         return cosf(M_PI * x / 2.0f) * cosf(M_PI * x / 4.0f) * cosf(M_PI * x / 8.0f);
-    return sinf(M_PI * x) / (M_PI * x);
+    return (float)(sinf(M_PI * x) / (M_PI * x));
 }
 
 // Kaiser taper parameter for a target stop-band attenuation (Kaiser:1974)
@@ -126,6 +127,7 @@ static float kaiser_beta(float as)
 }
 
 // Kaiser window sample i of n, taper beta (cf. Kaiser:1980)
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (i, n) is the window-sample accessor idiom
 static float kaiser_win(unsigned i, unsigned n, float beta)
 {
     float t = (float)i - (float)(n - 1) / 2.0f;
@@ -133,6 +135,7 @@ static float kaiser_win(unsigned i, unsigned n, float beta)
     return besseli0(beta * sqrtf(1.0f - r * r)) / besseli0(beta);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (fc, as) is the standard Kaiser design pair
 void dsp_kaiser_lowpass(unsigned n, float fc, float as, float *h)
 {
     float beta = kaiser_beta(as);

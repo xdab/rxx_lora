@@ -1,5 +1,6 @@
 #include "device.h"
 
+#include <complex.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -28,7 +29,7 @@ static void file_close(struct device *d)
     struct file_device *s = (struct file_device *)d;
 
     if (s->f)
-        fclose(s->f);
+        (void)fclose(s->f);
     free(s);
 }
 
@@ -43,7 +44,7 @@ struct device *device_open_file(const char *path, double rate_hz)
     struct file_device *s = calloc(1, sizeof(*s));
     if (!s)
     {
-        fclose(f);
+        (void)fclose(f);
         return NULL;
     }
 

@@ -32,6 +32,10 @@ Naturally, the likes of `librtlsdr` are unavoidable if support for the actual de
   - Debian/Ubuntu: `clang-format`
   - Fedora: `clang-tools-extra`
   - Arch: `clang`
+- (Optional) `clang-tidy` static analyzer (`make tidy`):
+  - Debian/Ubuntu: `clang-tidy`
+  - Fedora: `clang-tools-extra`
+  - Arch: `clang`
 
 ### **Python** (optional, helper tools)
 

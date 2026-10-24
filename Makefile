@@ -135,6 +135,15 @@ fmt-check:
 	ruff format --check $(PY_SOURCES)
 	ruff check $(PY_SOURCES)
 
+# Static analysis gate (clang-tidy; check set in .clang-tidy at repo root).
+# Findings exit nonzero, like fmt-check. The compdb prerequisite keeps the
+# compile database fresh; clang-tidy only parses (needs headers, not libs).
+.PHONY: tidy
+tidy: compdb
+	@command -v clang-tidy >/dev/null 2>&1 || { \
+		echo "ERROR: clang-tidy not installed (Arch: sudo pacman -S clang)"; exit 1; }
+	clang-tidy -p . $(SOURCES) --warnings-as-errors=*
+
 # API docs (Doxyfile at repo root; output in docs/doxygen/html)
 .PHONY: doc
 doc:
@@ -157,6 +166,7 @@ help:
 	@echo "  doc         - Generate API docs with doxygen"
 	@echo "  fmt         - Format src/*.c, include/*.h (clang-format) and tools/*.py (ruff)"
 	@echo "  fmt-check   - Check tools/*.py formatting/lint (gate, nonzero on findings)"
+	@echo "  tidy        - Static analysis gate over src/*.c (clang-tidy, .clang-tidy)"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make                # Build bin/file_lora"

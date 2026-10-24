@@ -4,7 +4,9 @@
 
 #include "utilities.h"
 
+#include <complex.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 // Reference: [gr-lora_sdr] utilities.h:50
@@ -14,6 +16,7 @@ long util_mod(long a, long b) { return (a % b + b) % b; }
 int util_round(float number) { return (int)(number > 0 ? number + 0.5f : ceilf(number - 0.5f)); }
 
 // Reference: [gr-lora_sdr] utilities.h:95; [gr-lora] demod_impl.cc:96-101
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors [gr-lora_sdr]
 void util_build_upchirp(float complex *chirp, uint32_t id, uint8_t sf, uint8_t os_factor)
 {
     double n = 1u << sf;
@@ -45,6 +48,7 @@ void util_build_ref_chirps(
 }
 
 // Reference: [gr-lora_sdr] utilities.h:129
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // n counts entries, bins sizes the histogram
 int util_most_frequent(const int *arr, int n, uint32_t number_of_bins)
 {
     int *hash = calloc(number_of_bins, sizeof(*hash));

@@ -1,5 +1,6 @@
 #include "ring.h"
 
+#include <complex.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -96,8 +97,4 @@ void ring_drop(struct ring *r, size_t n)
         ring_compact(r);
 }
 
-const float complex *ring_peek(const struct ring *r, size_t off, size_t n)
-{
-    (void)n; // off + n <= ring_len is the caller's contract
-    return r->buf + r->start + off;
-}
+const float complex *ring_peek(const struct ring *r, size_t off) { return r->buf + r->start + off; }

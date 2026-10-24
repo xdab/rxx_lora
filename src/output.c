@@ -61,5 +61,5 @@ void output_frame(const struct output_record *rec)
         rec->input_sample,
         rec->time_seconds);
 
-    fflush(stdout);
+    (void)fflush(stdout);
 }

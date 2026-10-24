@@ -313,7 +313,7 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
 {
     const float complex *w;
 
-    while ((w = source_window(src, *pos, *pos + 2 * st->samples_per_symbol)))
+    while ((w = source_window(src, *pos, *pos + 2 * (size_t)st->samples_per_symbol)))
     {
         uint32_t advance = 0;
         int ret = frame_sync_sync_step(fs, w, &advance, st);
@@ -333,6 +333,7 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
                 *pos);
             log_input_sample(src, *pos);
 
+            int grid_shift = (int)advance - (int)(st->samples_per_symbol / 4);
             log_trace(
                 "CFO: cfo=%+.4f bins (%.1f Hz) from SFD down_val=%d\n"
                 "CFO: payload grid shift = %d samples (= %+.4f chips, "
@@ -340,8 +341,8 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
                 (double)st->cfo,
                 (double)st->cfo * st->bandwidth / st->number_of_bins,
                 st->down_val,
-                (int)advance - (int)st->samples_per_symbol / 4,
-                (double)((int)advance - (int)st->samples_per_symbol / 4) / (double)st->os);
+                grid_shift,
+                (double)grid_shift / (double)st->os);
 
             return 1;
         }

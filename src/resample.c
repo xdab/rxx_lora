@@ -102,6 +102,7 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     return n;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // directional (rate_in -> rate_out) pair
 struct resampler *resampler_create(double rate_in, double rate_out, double bandwidth_hz)
 {
     if (!(rate_in > 0.0) || !(rate_out > 0.0))

@@ -4,11 +4,14 @@
  * frame_sync.c, SYNC/SFO_COMPENSATION in sync.c.
  */
 
+#include "frame_sync.h"
 #include "frame_sync_internal.h"
 
 #include "logging.h"
 #include "utilities.h"
+#include <complex.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,7 +112,7 @@ static int get_symbol_val_detect(
         }
 
         for (uint32_t b = 0; b < n; b++)
-            s->detect_mag_avg[b] = s->detect_mag_sum[b] / fill;
+            s->detect_mag_avg[b] = s->detect_mag_sum[b] / (float)fill;
         mag = s->detect_mag_avg;
     }
 
@@ -330,8 +333,7 @@ int frame_sync_detect_step(
         for (int k = 0; k < s->n_up_req; k++)
         {
             const float complex *src = s->detect_run_srcs + (size_t)k * s->samples_per_symbol;
-            frame_sync_downsample_prologue(
-                s, src, &s->preamble_raw[s->number_of_bins * (uint32_t)k]);
+            frame_sync_downsample_prologue(s, src, &s->preamble_raw[(size_t)s->number_of_bins * k]);
         }
         s->phase = FS_SYNC;
         s->symbol_cnt = 0;

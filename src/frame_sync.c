@@ -4,10 +4,14 @@
  * DETECT state lives in detect.c, SYNC/SFO_COMPENSATION in sync.c.
  */
 
+#include "frame_sync.h"
+#include "dsp.h"
 #include "frame_sync_internal.h"
 
 #include "logging.h"
 #include "utilities.h"
+#include <complex.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +21,7 @@ static void frame_sync_cleanup(struct frame_sync *s);
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
 // [gr-lora] demod_impl.cc:54
 struct frame_sync *frame_sync_create(
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors the reference's constructor
     uint8_t spreading_factor,
     uint8_t oversampling_factor,
     uint16_t preamble_len,
@@ -62,7 +67,7 @@ struct frame_sync *frame_sync_create(
         malloc((size_t)(s->n_up_req + 3) * s->number_of_bins * sizeof(*s->cfo_correc_long));
     s->sfo_corr_vect =
         malloc((size_t)(s->n_up_req + 3) * s->number_of_bins * sizeof(*s->sfo_corr_vect));
-    s->net_ids_samp_dec = malloc(2 * s->number_of_bins * sizeof(*s->net_ids_samp_dec));
+    s->net_ids_samp_dec = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->net_ids_samp_dec));
     s->rot_tmp = malloc(s->samples_per_symbol * sizeof(*s->rot_tmp));
     s->preamble_upchirps =
         malloc((size_t)preamble_len * s->number_of_bins * sizeof(*s->preamble_upchirps));
@@ -71,9 +76,9 @@ struct frame_sync *frame_sync_create(
         malloc((size_t)s->n_up_req * s->number_of_bins * sizeof(*s->cfo_correc_aug));
     s->symb_corr = malloc(s->number_of_bins * sizeof(*s->symb_corr));
     s->est_dechirped = malloc(s->number_of_bins * sizeof(*s->est_dechirped));
-    s->est_cx_in = malloc(2 * s->number_of_bins * sizeof(*s->est_cx_in));
-    s->est_cx_out = malloc(2 * s->number_of_bins * sizeof(*s->est_cx_out));
-    s->est_fft_mag = malloc(2 * s->number_of_bins * sizeof(*s->est_fft_mag));
+    s->est_cx_in = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_cx_in));
+    s->est_cx_out = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_cx_out));
+    s->est_fft_mag = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_fft_mag));
     s->est_fft_val = malloc((size_t)s->n_up_req * s->number_of_bins * sizeof(*s->est_fft_val));
     s->est_k0 = malloc(s->n_up_req * sizeof(*s->est_k0));
     s->est_k0_mag = malloc(s->n_up_req * sizeof(*s->est_k0_mag));
@@ -229,7 +234,7 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
 void frame_sync_downsample_prologue(
     struct frame_sync *s, const float complex *in, float complex *dst)
 {
-    int sto_samp = util_round(s->sto_frac * s->oversampling_factor);
+    int sto_samp = util_round(s->sto_frac * (float)s->oversampling_factor);
     for (uint32_t ii = 0; ii < s->number_of_bins; ii++)
     {
         /* clamp at 0: for odd os_factor the first index can go negative

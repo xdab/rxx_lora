@@ -4,11 +4,15 @@
  * detect.c.
  */
 
+#include "dsp.h"
+#include "frame_sync.h"
 #include "frame_sync_internal.h"
 
 #include "logging.h"
 #include "utilities.h"
+#include <complex.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,15 +129,15 @@ static float estimate_sto_frac(struct frame_sync *s)
         if (s->est_fft_mag[j] > s->est_fft_mag[k0])
             k0 = (int)j;
 
-    double y_m1 = s->est_fft_mag[util_mod(k0 - 1, 2 * n)];
+    double y_m1 = s->est_fft_mag[util_mod(k0 - 1, 2 * (long)n)];
     double y0 = s->est_fft_mag[k0];
-    double y1 = s->est_fft_mag[util_mod(k0 + 1, 2 * n)];
+    double y1 = s->est_fft_mag[util_mod(k0 + 1, 2 * (long)n)];
     double u = 64 * n / 406.5506497; // from Cui yang (eq.15)
     double v = u * 2.4674;
     double wa = (y1 - y_m1) / (u * (y1 + y_m1) + v * y0);
     double ka = wa * n / M_PI;
     double k_residual = fmod((k0 + ka) / 2, 1);
-    float sto_frac = k_residual - (k_residual > 0.5 ? 1 : 0);
+    float sto_frac = (float)(k_residual - (k_residual > 0.5 ? 1 : 0));
 
     return sto_frac;
 }
@@ -160,7 +164,7 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     const uint32_t n = s->number_of_bins;
 
     int down_signed = ((uint32_t)s->down_val < n / 2) ? s->down_val : s->down_val - (int)n;
-    float cfo_coarse = util_round((float)down_signed / 2.0f - s->cfo);
+    float cfo_coarse = (float)util_round((float)down_signed / 2.0f - s->cfo);
     s->cfo = cfo_coarse + s->cfo; // the estimate is now complete
 
 #if RXX_EXPERIMENTAL // env-var knob: nudge the whole estimate (bins)
@@ -222,7 +226,8 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
      * (frame_sync_impl.cc:638); the default-off guard is a deliberate
      * deviation, the reference assumes the coupling even where it cannot
      * hold. */
-    s->sfo_hat = (s->center_freq != 0) ? (s->cfo * s->bandwidth) / s->center_freq : 0.0f;
+    s->sfo_hat =
+        (s->center_freq != 0) ? (s->cfo * (float)s->bandwidth) / (float)s->center_freq : 0.0f;
 
 #if RXX_EXPERIMENTAL // env-var knob: force the SFO estimate (chips/symbol)
     {
@@ -232,7 +237,7 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     }
 #endif
 
-    double clk_off = s->sfo_hat / n;
+    double clk_off = s->sfo_hat / (float)n;
     double fs = s->bandwidth;
     double fs_p = s->bandwidth * (1 - clk_off);
     double bwpow_p = s->bandwidth / fs_p * s->bandwidth / fs_p;
@@ -251,6 +256,8 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
             if (m == 0)
             {
                 blk_z = 1.0;
+                // j / n is the symbol (block) index, integer by design
+                // NOLINTNEXTLINE(bugprone-integer-division)
                 blk_step = cexp(I * (A + B0 + Bblk * (double)(j / n)));
             }
             s->sfo_corr_vect[j] = (float complex)blk_z;
@@ -275,9 +282,10 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
 {
     const uint32_t n = s->number_of_bins;
 
-    int start_off = (int)s->oversampling_factor / 2 -
-                    util_round(s->sto_frac * s->oversampling_factor) +
-                    s->oversampling_factor * (0.25 * n + cfo_int);
+    // NOLINTNEXTLINE(bugprone-integer-division) - os / 2 truncation is by design
+    int start_off = (int)((int)s->oversampling_factor / 2 -
+                          util_round(s->sto_frac * (float)s->oversampling_factor) +
+                          s->oversampling_factor * (0.25 * n + cfo_int));
     for (uint32_t i = 0; i < 2 * n; i++)
         s->net_ids_samp_dec[i] = s->net_id_samp[start_off + i * s->oversampling_factor];
     for (uint32_t i = 0; i < 2 * n; i++)
@@ -298,7 +306,7 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
         int b[2][2] = {{-1, -1}, {-1, -1}};
         for (int sym = 0; sym < 2; sym++)
         {
-            frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[sym * n], s->downchirp);
+            frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[(size_t)sym * n], s->downchirp);
             for (uint32_t i = 0; i < s->number_of_bins; i++)
             {
                 if (s->fft_mag[i] > m[sym][0])
@@ -366,7 +374,7 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
         {
             char extra[64] = "";
             if (off)
-                snprintf(
+                (void)snprintf(
                     extra,
                     sizeof(extra),
                     "; grid snapped %+d bin -> netid1 %d",
@@ -572,12 +580,13 @@ int frame_sync_sync_step(
         // settle the residual STO against the corrected preamble
         float tmp_sto_frac = estimate_sto_frac(s);
         float diff_sto_frac = s->sto_frac - tmp_sto_frac;
-        if (fabsf(diff_sto_frac) <= (float)(s->oversampling_factor - 1) / s->oversampling_factor)
+        if (fabsf(diff_sto_frac) <=
+            (float)(s->oversampling_factor - 1) / (float)s->oversampling_factor)
             s->sto_frac = tmp_sto_frac;
 
         // SNR estimate not ported (log only)
 
-        s->sto_frac += s->sfo_hat * s->preamble_len;
+        s->sto_frac += s->sfo_hat * (float)s->preamble_len;
         if (fabsf(s->sto_frac) > 0.5f)
             s->sto_frac += s->sto_frac > 0 ? -1 : 1;
 
@@ -593,10 +602,9 @@ int frame_sync_sync_step(
 
         s->phase = FS_SFO_COMP;
 
-        s->sto_frac += s->sfo_hat * 4.25;
-        s->sfo_cum = ((s->sto_frac * s->oversampling_factor) -
-                      util_round(s->sto_frac * s->oversampling_factor)) /
-                     s->oversampling_factor;
+        float osf = (float)s->oversampling_factor;
+        s->sto_frac += s->sfo_hat * 4.25f;
+        s->sfo_cum = ((s->sto_frac * osf) - (float)util_round(s->sto_frac * osf)) / osf;
         // frame_info tag not ported
         // One chip per bin, driven by the whole-bin part as in the reference.
         s->consume += s->samples_per_symbol / 4 + s->oversampling_factor * cfo_int;
@@ -636,11 +644,11 @@ const float complex *frame_sync_output_step(
         memcpy(s->out_win, s->in_down, s->number_of_bins * sizeof(*s->in_down));
         s->consume = s->samples_per_symbol;
 
-        if (fabsf(s->sfo_cum) > 1.0f / 2 / s->oversampling_factor)
+        if (fabsf(s->sfo_cum) > 1.0f / 2 / (float)s->oversampling_factor)
         {
             int adj = signbit(s->sfo_cum) ? -1 : 1;
             s->consume -= adj;
-            s->sfo_cum -= adj * 1.0f / s->oversampling_factor;
+            s->sfo_cum -= (float)adj * 1.0f / (float)s->oversampling_factor;
         }
 
         s->sfo_cum += s->sfo_hat;

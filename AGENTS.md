@@ -49,6 +49,7 @@ cross-check os/sf/bw whenever they meet.
 ### Main project code (C)
 
 - clean `make` under `-Wall -Wextra`; `clang-format -i` on touched files;
+- `make tidy` passing;
 - `python3 tools/regression.py` fully passing;
 
 ### Python

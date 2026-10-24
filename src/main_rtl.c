@@ -1,5 +1,4 @@
-#include <complex.h>
-#include <getopt.h>
+#include <getopt.h> // NOLINT(misc-include-cleaner)
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +27,7 @@ static void on_signal(int sig)
 
 static void usage(void)
 {
-    fprintf(
+    (void)fprintf(
         stderr,
         APP_NAME ", a live LoRa (CSS) receiver for RTL-SDR dongles\n"
                  "\n"
@@ -124,25 +123,25 @@ int main(int argc, char **argv)
         switch (opt)
         {
         case 'd':
-            dev_index = atoi(optarg);
+            dev_index = (int)strtol(optarg, NULL, 10);
             break;
         case 's':
-            sf = atoi(optarg);
+            sf = (int)strtol(optarg, NULL, 10);
             break;
         case 'o':
-            os = atoi(optarg);
+            os = (int)strtol(optarg, NULL, 10);
             break;
         case 'p':
-            preamble_avg = atoi(optarg);
+            preamble_avg = (int)strtol(optarg, NULL, 10);
             break;
         case 'a':
-            detect_avg = atoi(optarg);
+            detect_avg = (int)strtol(optarg, NULL, 10);
             break;
         case 'w':
             sync_word_filter = (long)strtoul(optarg, NULL, 0);
             break;
         case 'g':
-            gain_db = atof(optarg);
+            gain_db = strtod(optarg, NULL);
             break;
         case 'T':
             biastee = 1;
@@ -160,16 +159,16 @@ int main(int argc, char **argv)
             dc_block = 1;
             break;
         case OPT_CENTER_FREQ:
-            center_freq = atof(optarg);
+            center_freq = strtod(optarg, NULL);
             break;
         case OPT_BW:
-            bandwidth = atof(optarg);
+            bandwidth = strtod(optarg, NULL);
             break;
         case OPT_INPUT_RATE:
-            capture_rate = atof(optarg);
+            capture_rate = strtod(optarg, NULL);
             break;
         case OPT_PPM:
-            ppm = atoi(optarg);
+            ppm = (int)strtol(optarg, NULL, 10);
             break;
         case 'v':
         case 'q':
@@ -184,7 +183,7 @@ int main(int argc, char **argv)
 
     if (optind < argc)
     {
-        fprintf(stderr, "%s takes no positional arguments\n", APP_NAME);
+        (void)fprintf(stderr, "%s takes no positional arguments\n", APP_NAME);
         usage();
         return 1;
     }
@@ -194,10 +193,10 @@ int main(int argc, char **argv)
         bandwidth <= 0.0 || capture_rate < 0.0 || timeout_s < 0.0)
     {
         if (center_freq <= 0.0)
-            fprintf(stderr, "RTL needs --center-freq\n");
+            (void)fprintf(stderr, "RTL needs --center-freq\n");
 
         if (timeout_s < 0.0)
-            fprintf(stderr, "bad -x duration (use a number, optionally s/m/h)\n");
+            (void)fprintf(stderr, "bad -x duration (use a number, optionally s/m/h)\n");
 
         usage();
         return 1;
@@ -211,13 +210,13 @@ int main(int argc, char **argv)
     if (!g_dev)
         return 1;
 
-    signal(SIGINT, on_signal);
-    signal(SIGTERM, on_signal);
+    (void)signal(SIGINT, on_signal);
+    (void)signal(SIGTERM, on_signal);
 
     if (timeout_s > 0.0)
     {
         // route the budget through the same clean stop as Ctrl-C (device_stop)
-        signal(SIGALRM, on_signal);
+        (void)signal(SIGALRM, on_signal);
 
         long sec = (long)timeout_s;
         long usec = (long)((timeout_s - (double)sec) * 1e6);

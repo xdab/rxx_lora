@@ -1,5 +1,6 @@
 #include "source.h"
 
+#include <complex.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,6 +123,7 @@ static int source_fill(struct source *s, size_t need)
 }
 
 struct source *
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // config-style, one call per binary
 source_create(struct device *dev, int sf, int os, double bandwidth, int conj, int dc_block)
 {
     struct source *s = calloc(1, sizeof(*s));
@@ -189,7 +191,7 @@ const float complex *source_window(struct source *s, size_t pos, size_t end)
     if (!source_fill(s, end))
         return NULL;
 
-    return ring_peek(s->ring, pos - s->off, end - pos);
+    return ring_peek(s->ring, pos - s->off);
 }
 
 void source_advance(struct source *s, size_t pos)

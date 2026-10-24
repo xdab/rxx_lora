@@ -1,9 +1,11 @@
 #include "device.h"
 
+#include <complex.h>
 #include <math.h>
 #include <pthread.h>
 #include <rtl-sdr.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,7 +57,7 @@ static double mono_seconds(void)
 
     clock_gettime(CLOCK_MONOTONIC, &t);
 
-    return (double)t.tv_sec + t.tv_nsec * 1e-9;
+    return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
 }
 
 static uint32_t snap_rate(double want)
@@ -111,7 +113,7 @@ static void rtl_async_cb(unsigned char *buf, uint32_t len, void *ctx)
     if (s->record && fwrite(s->conv, sizeof(*s->conv), m, s->record) != m)
     {
         log_warn("IQ recording write failed; recording stopped\n");
-        fclose(s->record);
+        (void)fclose(s->record);
         s->record = NULL;
     }
 
@@ -198,7 +200,7 @@ static size_t rtl_read(struct device *d, float complex *out, size_t n)
         m = n;
     if (m)
     {
-        memcpy(out, ring_peek(s->ring, 0, m), m * sizeof(*out));
+        memcpy(out, ring_peek(s->ring, 0), m * sizeof(*out));
         ring_drop(s->ring, m);
     }
     pthread_mutex_unlock(&s->lock);
@@ -229,8 +231,8 @@ static void rtl_close(struct device *d)
         rtlsdr_cancel_async(s->dev);
         pthread_join(s->reader, NULL);
     }
-    if (s->record)
-        fclose(s->record); // flush the tail of the capture
+    if (s->record && fclose(s->record) != 0)
+        log_warn("IQ recording: final flush failed\n");
     if (s->dev)
         rtlsdr_close(s->dev);
     rtl_free(s);
@@ -240,6 +242,7 @@ static const struct device_ops rtl_ops = {rtl_read, rtl_rate, rtl_stop, rtl_clos
 
 struct device *device_open_rtl(
     int index,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // config-style, one call site (main_rtl)
     double center_hz,
     double capture_hz,
     double gain_db,
@@ -340,9 +343,8 @@ struct device *device_open_rtl(
     {
         log_error("cannot start the RTL reader thread\n");
         if (s->record)
-            fclose(s->record);
+            (void)fclose(s->record);
         rtl_free(s);
-        free(s);
         rtlsdr_close(dev);
         return NULL;
     }

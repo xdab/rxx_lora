@@ -4,9 +4,12 @@
 
 #include "demod.h"
 
+#include "dsp.h"
 #include "logging.h"
 #include "utilities.h"
+#include <complex.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 

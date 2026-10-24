@@ -4,6 +4,7 @@
  */
 
 #include "header.h"
+#include <stdint.h>
 
 // Reference: [gr-lora_sdr] header_decoder_impl.cc:71,133-162
 int decode_header(const uint8_t *nibs, struct lora_header *h)
@@ -39,6 +40,7 @@ int decode_header(const uint8_t *nibs, struct lora_header *h)
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:419
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors the reference's symb_numb formula
 uint32_t decode_symbol_budget(uint8_t pay_len, uint8_t cr, int has_crc, uint8_t sf)
 {
     /* symb_numb = 8 + ceil((2*pay_len - sf + 2 + 5 + 4*crc) / sf) * (4+cr);

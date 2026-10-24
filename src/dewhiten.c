@@ -1,4 +1,6 @@
 #include "dewhiten.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // [gr-lora_sdr] tables.h whitening_seq, verbatim
 static const uint8_t whitening_seq[255] = {
@@ -24,6 +26,6 @@ static const uint8_t whitening_seq[255] = {
 void dewhiten(const uint8_t *nibs, uint8_t n, uint8_t *out)
 {
     for (uint8_t i = 0; i < n; i++)
-        out[i] = (uint8_t)(((nibs[2 * i + 1] ^ (whitening_seq[i] >> 4)) << 4) |
-                           (nibs[2 * i] ^ (whitening_seq[i] & 0x0F)));
+        out[i] = (uint8_t)(((nibs[2 * (size_t)i + 1] ^ (whitening_seq[i] >> 4)) << 4) |
+                           (nibs[2 * (size_t)i] ^ (whitening_seq[i] & 0x0F)));
 }
