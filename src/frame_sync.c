@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "utilities.h"
 #include <complex.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -208,6 +209,95 @@ void frame_sync_set_symbol_budget(struct frame_sync *s, uint32_t symb_numb)
     s->received_head = 1;
 }
 
+/* Gather kernel half-length: 2*FRAC_M taps. The default matches the house
+ * resampler's m=4 (60 dB); experimental builds can sweep it. */
+static unsigned frac_gather_m(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: gather kernel half-length
+    static unsigned cached = 0;
+    if (!cached)
+    {
+        const char *e = getenv("FRAC_M");
+        cached = e ? (unsigned)strtol(e, NULL, 10) : 4;
+        if (cached < 1 || cached > 8)
+            cached = 4;
+    }
+    return cached;
+#else
+    return 4;
+#endif
+}
+
+static float bessel_i0(float x)
+{
+    /* Power series; converges long before the Kaiser betas in use run out
+     * of float range. */
+    float sum = 1.0f, term = 1.0f;
+    for (int k = 1; k < 24; k++)
+    {
+        float half = x / (2.0f * (float)k);
+        term *= half * half;
+        sum += term;
+        if (term < 1e-9f * sum)
+            break;
+    }
+    return sum;
+}
+
+// a gather is directional (dst <- in); the geometry quadruple is inherent
+void frame_sync_frac_gather(
+    float complex *dst,
+    const float complex *in,
+    float base, // NOLINT(bugprone-easily-swappable-parameters)
+    int stride,
+    uint32_t count,
+    uint32_t len)
+{
+    unsigned m = frac_gather_m();
+    int i0 = (int)floorf(base);
+    float f = base - (float)i0;
+
+    if (f < 1e-4f)
+    { /* integer position: the kernel is a unit impulse, plain stride (the
+       * pre-payload callers always land here — no estimate exists yet) */
+        for (uint32_t i = 0; i < count; i++)
+        {
+            int t = i0 + stride * (int)i;
+            dst[i] = in[t < 0 ? 0 : (t > (int)len - 1 ? (int)len - 1 : t)];
+        }
+        return;
+    }
+
+    /* Weights once per call: the fractional offset is the same for every
+     * output (stride is an integer), only the integer part advances. */
+    float w[16];
+    float beta = 5.6536f; // 60 dB stopband, the house resampler's as=60
+    float ib = bessel_i0(beta);
+    float wsum = 0.0f;
+    for (unsigned j = 0; j < 2 * m; j++)
+    {
+        float d = (float)((int)j - (int)m + 1) - f; // tap - base
+        float sinc = fabsf(d) < 1e-7f ? 1.0f : sinf((float)M_PI * d) / ((float)M_PI * d);
+        float x = 2.0f * (float)j / (float)(2 * m - 1) - 1.0f;
+        w[j] = sinc * bessel_i0(beta * sqrtf(1.0f - x * x)) / ib;
+        wsum += w[j];
+    }
+    for (unsigned j = 0; j < 2 * m; j++)
+        w[j] /= wsum; // unity DC gain
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        float complex acc = 0;
+        for (unsigned j = 0; j < 2 * m; j++)
+        {
+            int t = i0 + stride * (int)i + (int)j - (int)m + 1;
+            t = t < 0 ? 0 : (t > (int)len - 1 ? (int)len - 1 : t);
+            acc += w[j] * in[t];
+        }
+        dst[i] = acc;
+    }
+}
+
 void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
 {
     *st = (struct frame_sync_status){
@@ -234,14 +324,24 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
 void frame_sync_downsample_prologue(
     struct frame_sync *s, const float complex *in, float complex *dst)
 {
-    int sto_samp = util_round(s->sto_frac * (float)s->oversampling_factor);
-    for (uint32_t ii = 0; ii < s->number_of_bins; ii++)
-    {
-        /* clamp at 0: for odd os_factor the first index can go negative
-         * (util_round rounds half away from zero) and read before the window */
-        int tap = (int)(s->oversampling_factor / 2) + (int)(s->oversampling_factor * ii) - sto_samp;
-        dst[ii] = in[tap < 0 ? 0 : tap];
-    }
+    /* Continuous timing application: the STO estimate at sub-chip precision,
+     * plus — in the payload phase — the SFO walk not yet folded into a
+     * whole-sample slip. The stream grid (consume) stays integer; the gather
+     * carries the fraction the round() used to discard, which is what made
+     * low os lose (at os=1 it discarded the estimate outright). Pre-payload
+     * callers (DETECT windows, SYNC walk) have no estimate yet and take the
+     * fast integer path. */
+    float sto_samp = s->sto_frac * (float)s->oversampling_factor;
+    if (s->phase == FS_SFO_COMP)
+        sto_samp += s->sfo_cum * (float)s->oversampling_factor;
+    frame_sync_frac_gather(
+        dst,
+        in,
+        // os / 2 truncation is by design
+        (float)(s->oversampling_factor / 2) - sto_samp, // NOLINT(bugprone-integer-division)
+        (int)s->oversampling_factor,
+        s->number_of_bins,
+        s->samples_per_symbol);
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:322; [gr-lora] demod_impl.cc:199-206

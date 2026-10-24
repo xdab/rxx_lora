@@ -286,8 +286,19 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
     int start_off = (int)((int)s->oversampling_factor / 2 -
                           util_round(s->sto_frac * (float)s->oversampling_factor) +
                           s->oversampling_factor * (0.25 * n + cfo_int));
-    for (uint32_t i = 0; i < 2 * n; i++)
-        s->net_ids_samp_dec[i] = s->net_id_samp[start_off + i * s->oversampling_factor];
+    /* the pair read applies sto_frac at full fractional precision; the int
+     * start_off above is the trace/verdict grid only */
+    // NOLINTNEXTLINE(bugprone-integer-division) - os / 2 truncation is by design
+    float base = (float)((int)s->oversampling_factor / 2) -
+                 s->sto_frac * (float)s->oversampling_factor +
+                 (float)s->oversampling_factor * (0.25f * (float)n + (float)cfo_int);
+    frame_sync_frac_gather(
+        s->net_ids_samp_dec,
+        s->net_id_samp,
+        base,
+        (int)s->oversampling_factor,
+        2 * n,
+        (uint32_t)(2.5f * (float)s->samples_per_symbol));
     for (uint32_t i = 0; i < 2 * n; i++)
         s->net_ids_samp_dec[i] *= s->cfo_correc_long[i];
     for (uint32_t i = 0; i < n; i++)

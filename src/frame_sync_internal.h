@@ -16,8 +16,8 @@
 /** Detector phase, mirroring the reference's m_state enum. */
 enum frame_sync_phase
 {
-    FS_DETECT = 0, // sliding decision windows, hunting stable bins
-    FS_SYNC = 1,   // frame found; estimating and checking the sync word
+    FS_DETECT = 0,   // sliding decision windows, hunting stable bins
+    FS_SYNC = 1,     // frame found; estimating and checking the sync word
     FS_SFO_COMP = 2, // locked; producing corrected payload windows
 };
 
@@ -129,14 +129,35 @@ int frame_sync_get_symbol_val(
     struct frame_sync *s, const float complex *samples, const float complex *ref_chirp);
 
 /**
+ * @brief Band-limited gather at fractional sample positions:
+ *        dst[i] = in[base + i*stride], the continuous position interpolated
+ *        by a 2*FRAC_M-tap Kaiser-windowed sinc (weights built once — the
+ *        fractional offset is constant across the call, only the integer
+ *        part advances with the stride). Taps clamp to [0, len-1].
+ *
+ * Used by the prologue below and the net-id pair read (sync.c) to apply the
+ * STO/SFO estimates at sub-chip precision instead of rounding them onto the
+ * os-grid (TODOS.md, fractional-delay decimation taps).
+ */
+void frame_sync_frac_gather(
+    float complex *dst,
+    const float complex *in,
+    float base,
+    int stride,
+    uint32_t count,
+    uint32_t len);
+
+/**
  * @brief Decimate one oversampled input window into dst
- *        (os_factor stride, sto_frac-corrected, os/2 phase). The dst
+ *        (os_factor stride, sto_frac-corrected at fractional precision,
+ *        os/2 phase; in the payload phase the SFO walk rides along). The dst
  *        parameter (a deviation) lets DETECT materialize preamble_raw
  *        lazily (detect.c).
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:499-501.
  */
-void frame_sync_downsample_prologue(struct frame_sync *s, const float complex *in, float complex *dst);
+void frame_sync_downsample_prologue(
+    struct frame_sync *s, const float complex *in, float complex *dst);
 
 /**
  * @brief Bernier fractional-CFO estimator over the buffered preamble run.
