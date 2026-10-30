@@ -43,8 +43,10 @@ void util_build_ref_chirps(
 /**
  * @brief Most frequent value in arr (values in [0, number_of_bins)).
  *
- * @return the mode, or -1 on allocation failure
+ * `hash` is caller-owned scratch of number_of_bins ints.
+ *
+ * @return the mode
  */
-int util_most_frequent(const int *arr, int n, uint32_t number_of_bins);
+int util_most_frequent(const int *arr, int n, uint32_t number_of_bins, int *hash);
 
 #endif // UTILITIES_H

@@ -77,6 +77,7 @@ struct frame_sync
     float sfo_cum;                    // SFO sample-drift accumulator
     int net_id_off;                   // netid1 - sync_words[0], in [-2, 2]
     int *preamb_up_vals;              // bins of the current stable run
+    int *mode_hash;                   // util_most_frequent scratch, number_of_bins ints
     int additional_upchirps;          // extra preamble upchirps seen in SYNC
     float complex *upchirp;           // reference upchirp, N-point
     float complex *downchirp;         // reference downchirp, N-point

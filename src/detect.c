@@ -335,7 +335,8 @@ int frame_sync_detect_step(
         s->phase = FS_SYNC;
         s->symbol_cnt = 0;
         s->additional_upchirps = 0;
-        s->k_hat = util_most_frequent(s->preamb_up_vals, s->n_up_req, s->number_of_bins);
+        s->k_hat =
+            util_most_frequent(s->preamb_up_vals, s->n_up_req, s->number_of_bins, s->mode_hash);
         if (s->k_hat < 0)
         {
             if (st)
