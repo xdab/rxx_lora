@@ -136,7 +136,7 @@ int frame_sync_get_symbol_val(
  *
  * Used by the prologue below and the net-id pair read (sync.c) to apply the
  * STO/SFO estimates at sub-chip precision instead of rounding them onto the
- * os-grid (TODOS.md, fractional-delay decimation taps).
+ * os-grid.
  */
 void frame_sync_frac_gather(
     float complex *dst,
