@@ -314,27 +314,24 @@ int frame_sync_detect_step(
             s->preamb_up_vals[0] = s->bin_idx;
         s->preamb_up_vals[s->symbol_cnt] = bin_idx_new;
         memcpy(
-            s->detect_run_srcs + (size_t)s->symbol_cnt * s->samples_per_symbol,
-            in,
-            (size_t)s->samples_per_symbol * sizeof(*in));
+            s->preamble_raw + (size_t)s->symbol_cnt * s->number_of_bins,
+            s->in_down,
+            s->number_of_bins * sizeof(*s->in_down));
         s->symbol_cnt++;
     }
     else
     {
-        memcpy(s->detect_run_srcs, in, (size_t)s->samples_per_symbol * sizeof(*in));
+        memcpy(s->preamble_raw, s->in_down, s->number_of_bins * sizeof(*s->in_down));
         s->symbol_cnt = 1;
     }
     s->bin_idx = bin_idx_new;
 
     if (s->symbol_cnt == s->n_up_req)
     {
-        /* Deviation: record one source pointer per slot (detect_run_srcs) and
-         * materialize every window here, once the run proves real. */
-        for (int k = 0; k < s->n_up_req; k++)
-        {
-            const float complex *src = s->detect_run_srcs + (size_t)k * s->samples_per_symbol;
-            frame_sync_downsample_prologue(s, src, &s->preamble_raw[(size_t)s->number_of_bins * k]);
-        }
+        /* preamble_raw's first n_up_req windows are the run's decimated
+         * windows, archived as they were decided (the prologue is
+         * state-deterministic in DETECT, so re-decimating the raw windows
+         * would reproduce them); the remaining three slots are SYNC's. */
         s->phase = FS_SYNC;
         s->symbol_cnt = 0;
         s->additional_upchirps = 0;

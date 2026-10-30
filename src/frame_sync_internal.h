@@ -69,16 +69,14 @@ struct frame_sync
     int received_head;           // header decoded; unlocks the payload budget
 
     // internal (m_* members of frame_sync_impl.cc)
-    int bin_idx;         // previous window's winning bin
-    int symbol_cnt;      // DETECT: stable windows; SYNC: sub-phase
-    float sto_frac;      // fractional STO estimate in bins
-    int cfo_est_done;    // SYNC: the estimators already ran
-    int down_val;        // SFD downchirp demod value
-    float sfo_cum;       // SFO sample-drift accumulator
-    int net_id_off;      // netid1 - sync_words[0], in [-2, 2]
-    int *preamb_up_vals; // bins of the current stable run
-    float complex *
-        detect_run_srcs; // DETECT: n_up_req copied windows, slot k at [k*samples_per_symbol] (see detect.c)
+    int bin_idx;                      // previous window's winning bin
+    int symbol_cnt;                   // DETECT: stable windows; SYNC: sub-phase
+    float sto_frac;                   // fractional STO estimate in bins
+    int cfo_est_done;                 // SYNC: the estimators already ran
+    int down_val;                     // SFD downchirp demod value
+    float sfo_cum;                    // SFO sample-drift accumulator
+    int net_id_off;                   // netid1 - sync_words[0], in [-2, 2]
+    int *preamb_up_vals;              // bins of the current stable run
     int additional_upchirps;          // extra preamble upchirps seen in SYNC
     float complex *upchirp;           // reference upchirp, N-point
     float complex *downchirp;         // reference downchirp, N-point
