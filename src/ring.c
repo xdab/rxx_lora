@@ -85,7 +85,7 @@ int ring_reserve(struct ring *r, size_t n)
 
 float complex *ring_write_span(struct ring *r, size_t n)
 {
-    // ring_reserve(r, n) must have succeeded: the room exists past start+len
+    (void)n; // ring_reserve(r, n) must have succeeded: the room exists past start+len
     return r->buf + r->start + r->len;
 }
 

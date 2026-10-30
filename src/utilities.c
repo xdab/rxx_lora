@@ -7,7 +7,6 @@
 #include <complex.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 // Reference: [gr-lora_sdr] utilities.h:50
