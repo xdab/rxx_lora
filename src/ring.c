@@ -83,14 +83,22 @@ int ring_reserve(struct ring *r, size_t n)
     return 0;
 }
 
+float complex *ring_write_span(struct ring *r, size_t n)
+{
+    // ring_reserve(r, n) must have succeeded: the room exists past start+len
+    return r->buf + r->start + r->len;
+}
+
+void ring_commit(struct ring *r, size_t n) { r->len += n; }
+
 void ring_write(struct ring *r, const float complex *in, size_t n)
 {
     if (!n)
         return;
 
-    memcpy(r->buf + r->start + r->len, in, n * sizeof(*in));
+    memcpy(ring_write_span(r, n), in, n * sizeof(*in));
 
-    r->len += n;
+    ring_commit(r, n);
 }
 
 void ring_drop(struct ring *r, size_t n)

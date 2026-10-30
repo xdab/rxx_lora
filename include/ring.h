@@ -38,6 +38,14 @@ int ring_reserve(struct ring *r, size_t n);
 /** Append n samples; ring_reserve(r, n) must have succeeded first. */
 void ring_write(struct ring *r, const float complex *in, size_t n);
 
+/**
+ * Zero-copy append: the tail of the room ring_reserve(r, n) just made,
+ * to be filled by the caller (a device read or a resampler's out buffer).
+ * ring_commit(r, filled) then makes `filled` (<= n) samples live.
+ */
+float complex *ring_write_span(struct ring *r, size_t n);
+void ring_commit(struct ring *r, size_t n);
+
 /** Drop the n oldest samples (n <= ring_len); compacts when the dead prefix
  * reaches `chunk`. */
 void ring_drop(struct ring *r, size_t n);
