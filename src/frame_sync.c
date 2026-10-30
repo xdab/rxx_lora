@@ -53,11 +53,7 @@ struct frame_sync *frame_sync_create(
 
     int ret = -1;
     s->preamb_up_vals = malloc(s->n_up_req * sizeof(*s->preamb_up_vals));
-    // port-only: per-slot copies of the agreeing windows for the lazy
-    // preamble materialization (detect.c); the caller's buffer may be
-    // trimmed between steps
-    s->detect_run_srcs =
-        malloc((size_t)s->n_up_req * s->samples_per_symbol * sizeof(*s->detect_run_srcs));
+    s->mode_hash = malloc(s->number_of_bins * sizeof(*s->mode_hash));
     s->upchirp = malloc(s->number_of_bins * sizeof(*s->upchirp));
     s->downchirp = malloc(s->number_of_bins * sizeof(*s->downchirp));
     s->in_down = malloc(s->number_of_bins * sizeof(*s->in_down));
@@ -93,7 +89,7 @@ struct frame_sync *frame_sync_create(
         s->detect_mag_avg = malloc(s->number_of_bins * sizeof(*s->detect_mag_avg));
         s->detect_mag_sum = calloc(s->number_of_bins, sizeof(*s->detect_mag_sum));
     }
-    if (!s->preamb_up_vals || !s->detect_run_srcs || !s->upchirp || !s->downchirp || !s->in_down ||
+    if (!s->preamb_up_vals || !s->mode_hash || !s->upchirp || !s->downchirp || !s->in_down ||
         !s->out_win || !s->preamble_raw || !s->net_id_samp || !s->cfo_correc_long ||
         !s->sfo_corr_vect || !s->net_ids_samp_dec || !s->rot_tmp || !s->preamble_upchirps ||
         !s->cfo_correc || !s->cfo_correc_aug || !s->symb_corr || !s->est_dechirped ||
@@ -134,7 +130,7 @@ out:
 static void frame_sync_cleanup(struct frame_sync *s)
 {
     free(s->preamb_up_vals);
-    free(s->detect_run_srcs);
+    free(s->mode_hash);
     free(s->upchirp);
     free(s->downchirp);
     free(s->in_down);

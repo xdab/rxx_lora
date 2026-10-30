@@ -13,13 +13,25 @@ struct ring
     size_t chunk;       // dead-prefix threshold that triggers a compaction
 };
 
-struct ring *ring_create(size_t chunk)
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // config-style, one call per producer
+struct ring *ring_create(size_t chunk, size_t cap)
 {
     struct ring *r = calloc(1, sizeof(*r));
     if (!r)
         return NULL;
 
     r->chunk = chunk ? chunk : 1;
+
+    if (cap)
+    {
+        r->buf = malloc(cap * sizeof(*r->buf));
+        if (!r->buf)
+        {
+            free(r);
+            return NULL;
+        }
+        r->cap = cap;
+    }
 
     return r;
 }
@@ -71,14 +83,22 @@ int ring_reserve(struct ring *r, size_t n)
     return 0;
 }
 
+float complex *ring_write_span(struct ring *r, size_t n)
+{
+    (void)n; // ring_reserve(r, n) must have succeeded: the room exists past start+len
+    return r->buf + r->start + r->len;
+}
+
+void ring_commit(struct ring *r, size_t n) { r->len += n; }
+
 void ring_write(struct ring *r, const float complex *in, size_t n)
 {
     if (!n)
         return;
 
-    memcpy(r->buf + r->start + r->len, in, n * sizeof(*in));
+    memcpy(ring_write_span(r, n), in, n * sizeof(*in));
 
-    r->len += n;
+    ring_commit(r, n);
 }
 
 void ring_drop(struct ring *r, size_t n)

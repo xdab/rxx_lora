@@ -7,7 +7,7 @@
 #include <complex.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include <string.h>
 
 // Reference: [gr-lora_sdr] utilities.h:50
 long util_mod(long a, long b) { return (a % b + b) % b; }
@@ -49,11 +49,9 @@ void util_build_ref_chirps(
 
 // Reference: [gr-lora_sdr] utilities.h:129
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // n counts entries, bins sizes the histogram
-int util_most_frequent(const int *arr, int n, uint32_t number_of_bins)
+int util_most_frequent(const int *arr, int n, uint32_t number_of_bins, int *hash)
 {
-    int *hash = calloc(number_of_bins, sizeof(*hash));
-    if (!hash)
-        return -1;
+    memset(hash, 0, number_of_bins * sizeof(*hash));
 
     for (int i = 0; i < n; i++)
         hash[arr[i]]++;
@@ -68,6 +66,5 @@ int util_most_frequent(const int *arr, int n, uint32_t number_of_bins)
         }
     }
 
-    free(hash);
     return res;
 }
