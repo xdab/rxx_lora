@@ -309,8 +309,8 @@ struct device *device_open_rtl(
 
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init(&s->cond, NULL);
-    s->ring = ring_create(1 << 16);
     s->ring_cap = (size_t)(rate * RTL_RING_SECONDS);
+    s->ring = ring_create(1 << 16, s->ring_cap);
     s->conv = malloc(RTL_XFER_SAMPLES * sizeof(*s->conv));
 
     if (!s->ring || !s->conv)

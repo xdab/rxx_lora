@@ -140,8 +140,10 @@ source_create(struct device *dev, int sf, int os, double bandwidth, int conj, in
     s->slack = (size_t)(SYNC_LOOKAHEAD + 1) * sps + (size_t)os / 2;
 
     /* Reclaim the consumed head in chunks of a few look-aheads, so a steady
-     * scan pays one ring compaction per chunk instead of one per window. */
-    s->ring = ring_create(4 * s->slack);
+     * scan pays one ring compaction per chunk instead of one per window. The
+     * pre-sized capacity covers the steady state — dead prefix below `chunk`,
+     * a slack plus a read's worth of live samples — so it never reallocs. */
+    s->ring = ring_create(4 * s->slack, 6 * s->slack + 2 * (size_t)SRC_CHUNK);
     if (!s->ring)
     {
         free(s);

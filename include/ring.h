@@ -18,9 +18,11 @@ struct ring;
 
 /**
  * Create an empty ring; `chunk` is the dead-prefix size (samples) that
- * triggers a compaction. Returns NULL on allocation failure.
+ * triggers a compaction. `cap` pre-allocates the storage up front — steady
+ * state then never reallocs; 0 defers the allocation to the first
+ * ring_reserve. Returns NULL on allocation failure.
  */
-struct ring *ring_create(size_t chunk);
+struct ring *ring_create(size_t chunk, size_t cap);
 
 void ring_destroy(struct ring *r);
 

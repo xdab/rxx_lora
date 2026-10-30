@@ -13,13 +13,25 @@ struct ring
     size_t chunk;       // dead-prefix threshold that triggers a compaction
 };
 
-struct ring *ring_create(size_t chunk)
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // config-style, one call per producer
+struct ring *ring_create(size_t chunk, size_t cap)
 {
     struct ring *r = calloc(1, sizeof(*r));
     if (!r)
         return NULL;
 
     r->chunk = chunk ? chunk : 1;
+
+    if (cap)
+    {
+        r->buf = malloc(cap * sizeof(*r->buf));
+        if (!r->buf)
+        {
+            free(r);
+            return NULL;
+        }
+        r->cap = cap;
+    }
 
     return r;
 }
