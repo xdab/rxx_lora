@@ -23,34 +23,13 @@ struct source
     double rate_in;       // device (input/file) rate, for source_input_sample
     double rate_out;      // working rate bw*os
     int eof;
-    int err;              // allocation failure: folds into the end-of-stream return
-    int conj;             // --conj: conjugate samples as they enter
-    int dc_block_on;      // --dc-block: high-pass the device stream
-    struct dc_block dc;   // the blocker's state, when dc_block_on
-    float complex *stage; // resampler output, staged before it enters the ring
-    size_t stage_cap;
+    int err;            // allocation failure: folds into the end-of-stream return
+    int conj;           // --conj: conjugate samples as they enter
+    int dc_block_on;    // --dc-block: high-pass the device stream
+    struct dc_block dc; // the blocker's state, when dc_block_on
 };
 
 #define SRC_CHUNK (1 << 14) // device samples pulled per read
-
-static int source_stage(struct source *s, size_t need)
-{
-    if (need <= s->stage_cap)
-        return 0;
-
-    size_t cap = s->stage_cap ? s->stage_cap : SRC_CHUNK;
-    while (cap < need)
-        cap += cap / 2 + SRC_CHUNK;
-
-    float complex *b = realloc(s->stage, cap * sizeof(*b));
-    if (!b)
-        return -1;
-
-    s->stage = b;
-    s->stage_cap = cap;
-
-    return 0;
-}
 
 /* End of stream: note the data length, pad the look-ahead zeros. Returns
  * whether `need` is covered. */
@@ -58,14 +37,14 @@ static int source_eof_pad(struct source *s, size_t need)
 {
     s->eof = 1;
     s->total = (long)(s->off + ring_len(s->ring));
-    if (ring_reserve(s->ring, s->slack) != 0 || source_stage(s, s->slack) != 0)
+    if (ring_reserve(s->ring, s->slack) != 0)
     {
         log_error("out of memory padding the stream tail\n");
         s->err = 1;
         return 0;
     }
-    memset(s->stage, 0, s->slack * sizeof(*s->stage));
-    ring_write(s->ring, s->stage, s->slack);
+    memset(ring_write_span(s->ring, s->slack), 0, s->slack * sizeof(float complex));
+    ring_commit(s->ring, s->slack);
     return need <= (size_t)s->total;
 }
 
@@ -89,7 +68,7 @@ static int source_fill(struct source *s, size_t need)
 
         if (s->rs)
         {
-            // the resampler consumes a private input chunk and stages its output
+            // the resampler consumes a private input chunk
             float complex in[SRC_CHUNK];
 
             nr = device_read(s->dev, in, SRC_CHUNK);
@@ -104,14 +83,16 @@ static int source_fill(struct source *s, size_t need)
                 dc_block_apply(&s->dc, in, nr);
 
             size_t space = resampler_push_space(s->rs, nr) + 1;
-            if (ring_reserve(s->ring, space) != 0 || source_stage(s, space) != 0)
+            if (ring_reserve(s->ring, space) != 0)
             {
                 log_error("out of memory buffering the input stream\n");
                 s->err = 1;
                 return 0;
             }
 
-            ring_write(s->ring, s->stage, resampler_push(s->rs, in, nr, s->stage, space));
+            // the resampler fills the ring's tail directly, no staging copy
+            float complex *span = ring_write_span(s->ring, space);
+            ring_commit(s->ring, resampler_push(s->rs, in, nr, span, space));
         }
         else
         {
@@ -204,7 +185,6 @@ void source_destroy(struct source *s)
         return;
     resampler_destroy(s->rs);
     ring_destroy(s->ring);
-    free(s->stage);
     free(s);
 }
 
