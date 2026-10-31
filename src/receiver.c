@@ -108,7 +108,8 @@ static int next_symbol(
  * Payload: cr+4 symbols, sf codewords, the frame's cr.
  *
  * alt/marg optionally receive each codeword's runner-up candidate and
- * best-minus-second score (chase-retry fuel); NULL skips.
+ * best-minus-second score (chase-retry fuel); norm the codeword's LLR mass
+ * (margin gating divides by it); NULL skips.
  *
  * @return the number of nibbles written, or -1 on a malformed block size
  */
@@ -119,7 +120,8 @@ static int decode_block(
     int cr,
     uint8_t *nib,
     uint8_t *alt,
-    float *marg)
+    float *marg,
+    float *norm)
 {
     float cw_llr[MAX_SF][MAX_SF];
     int i;
@@ -130,8 +132,17 @@ static int decode_block(
     deinterleave_soft(sym_llr, (uint8_t)n_sym, (uint8_t)n_cw, cw_llr);
 
     for (i = 0; i < n_cw; i++)
+    {
+        if (norm)
+        {
+            float s = 0;
+            for (uint8_t j = 0; j < (uint8_t)(cr + 4); j++)
+                s += fabsf(cw_llr[i][j]);
+            norm[i] = s;
+        }
         nib[i] = hamming_decode_soft(
             cw_llr[i], (uint8_t)cr, alt ? &alt[i] : NULL, marg ? &marg[i] : NULL);
+    }
 
     return n_cw;
 }
@@ -172,23 +183,74 @@ static enum frame_decode finish_frame(
 
 static int chase_k(void)
 {
+#if RXX_EXPERIMENTAL // env-var knob: retry selection size, 0 disables
     const char *e = getenv("CHASE_K");
     int k = e ? atoi(e) : 4;
     return k > 8 ? 8 : (k < 0 ? 0 : k);
+#else
+    return 4;
+#endif
+}
+
+static int chase_singles(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: max single-flip attempts, <0 = all
+    const char *e = getenv("CHASE_SINGLES");
+    return e ? atoi(e) : -1;
+#else
+    return -1;
+#endif
+}
+
+static int chase_pairs(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: max pair-flip attempts, <0 = all
+    const char *e = getenv("CHASE_PAIRS");
+    return e ? atoi(e) : -1;
+#else
+    return -1;
+#endif
+}
+
+static float chase_marg(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: max margin/LLR-mass ratio to flip, <0 = off
+    const char *e = getenv("CHASE_MARG");
+    return e ? strtof(e, NULL) : 0.2f;
+#else
+    return 0.2f;
+#endif
+}
+
+static float chase_tau(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: max total flip LLR loss to accept, <0 = off
+    const char *e = getenv("CHASE_TAU");
+    return e ? strtof(e, NULL) : 1.0f;
+#else
+    return 1.0f;
+#endif
 }
 
 /*
- * Chase-II retry, CRC-arbitrated: flip the K least-reliable payload nibbles
- * to their runner-up codeword candidate, singles first, then pairs. A wrong
- * combo passes the CRC with p ~ 2^-16, so K <= 8 keeps false positives
- * negligible. Only payload nibbles flip: the CRC nibbles are the check itself.
+ * Chase-II retry, CRC-arbitrated. From the K least-reliable payload
+ * codewords — only those whose margin is a small fraction of their LLR mass
+ * when margin gating is on (CHASE_MARG): a certainly-correct codeword is
+ * pure collision risk with no rescue upside. Runner-up flips are enumerated,
+ * singles first, then pairs. Every CRC-passing combo is scored by the total
+ * LLR loss of its flips (the first-pass decode is per-codeword ML, so a
+ * genuine rescue loses little while a CRC collision usually loses a lot);
+ * the cheapest one is accepted if its loss is within the evidence budget
+ * CHASE_TAU. A wrong combo must now be both CRC-consistent and metrically
+ * plausible.
  *
  * @return 1 on a rescued frame (out filled), 0 if no combo verified
  */
 static int chase_retry(
     const uint8_t *nibs,
-    const uint8_t *alt,
     const float *marg,
+    const float *norm,
+    const uint8_t *alt,
     uint32_t nnib,
     uint32_t pay_nib,
     const struct lora_header *h,
@@ -196,45 +258,77 @@ static int chase_retry(
 {
     uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES] = {0};
     uint32_t sel[8];
-    struct frame_result res; // scratch: attempts must not clobber the verdict
-    int k = chase_k(), n_sel = 0, s, t;
+    struct frame_result res, best_res;
+    float marg_max = chase_marg(), tau = chase_tau();
+    float best_loss = 0;
+    int k = chase_k(), n_sel = 0, s, t, found = 0;
 
     if (k < 1 || pay_nib == 0 || pay_nib > nnib)
         return 0;
     if (pay_nib < (uint32_t)k)
         k = (int)pay_nib;
 
-    // partial selection: the k payload nibbles with the smallest margins
+    // partial selection: the k flippable payload nibbles with the smallest
+    // margins
     for (s = 0; s < k; s++)
     {
         uint32_t best = pay_nib;
         for (uint32_t i = 0; i < pay_nib; i++)
-            if (!used[i] && (best == pay_nib || marg[i] < marg[best]))
+        {
+            if (used[i])
+                continue;
+            if (marg_max >= 0 && marg[i] > marg_max * norm[i])
+                continue;
+            if (best == pay_nib || marg[i] < marg[best])
                 best = i;
+        }
         if (best == pay_nib)
             break;
         used[best] = 1;
         sel[n_sel++] = best;
     }
 
-    for (s = 0; s < n_sel; s++)
-        for (t = -1; t < s; t++) // t = -1: the single flip of sel[s]
+    // singles, worst margin first: losses ascend with s, so the first pass
+    // is also the cheapest single
+    int n_sing = chase_singles();
+    if (n_sing < 0 || n_sing > n_sel)
+        n_sing = n_sel;
+    for (s = 0; s < n_sing; s++)
+    {
+        memcpy(tmp, nibs, nnib);
+        tmp[sel[s]] = alt[sel[s]];
+        if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK)
         {
+            found = 1;
+            best_loss = marg[sel[s]];
+            best_res = res;
+            break;
+        }
+    }
+
+    // pairs, in selection order
+    int n_pair = chase_pairs();
+    for (s = 1; s < n_sel && n_pair; s++)
+        for (t = 0; t < s && n_pair; t++)
+        {
+            float loss = marg[sel[s]] + marg[sel[t]];
+            n_pair--;
             memcpy(tmp, nibs, nnib);
             tmp[sel[s]] = alt[sel[s]];
-            if (t >= 0)
-                tmp[sel[t]] = alt[sel[t]];
-            if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK)
+            tmp[sel[t]] = alt[sel[t]];
+            if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
             {
-                *out = res;
-                log_info(
-                    "chase: rescued with %d flipped codeword%s\n",
-                    t >= 0 ? 2 : 1,
-                    t >= 0 ? "s" : "");
-                return 1;
+                found = 1;
+                best_loss = loss;
+                best_res = res;
             }
         }
-    return 0;
+
+    if (!found || (tau >= 0 && best_loss > tau))
+        return 0;
+    *out = best_res;
+    log_info("chase: rescued, flip LLR loss %.1f\n", (double)best_loss);
+    return 1;
 }
 
 /*
@@ -255,7 +349,8 @@ static enum frame_decode decode_frame(
     float sllr[HEADER_SYMBOLS][MAX_SF];
     uint8_t hnib[MAX_SF], nibs[2 * MAX_BYTES + 4];
     uint8_t nalt[2 * MAX_BYTES + 4]; // chase-retry fuel: runner-up candidate
-    float nmarg[2 * MAX_BYTES + 4];  // and margin per payload codeword
+    float nmarg[2 * MAX_BYTES + 4];  // margin and LLR mass per payload codeword
+    float nnorm[2 * MAX_BYTES + 4];  // (gating and flip-loss scoring use both)
     uint32_t nnib = 0, needed, i;
     uint8_t cw_len, nb = 0;
     struct lora_header h;
@@ -280,7 +375,7 @@ static enum frame_decode decode_frame(
     // referenced to the full channel bandwidth
     out->snr_db = 10.f * log10f(snr_acc / (float)HEADER_SYMBOLS);
 
-    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib, NULL, NULL) < 0)
+    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib, NULL, NULL, NULL) < 0)
         return DECODE_HEADER;
 
     if (decode_header(hnib, &h) != 0)
@@ -313,7 +408,7 @@ static enum frame_decode decode_frame(
     while (nnib < needed)
     {
         uint8_t pnib[MAX_SF], palt[MAX_SF];
-        float pmarg[MAX_SF];
+        float pmarg[MAX_SF], pnorm[MAX_SF];
         int n;
 
         if (next_symbol(src, fs, fd, pos, sllr[nb], st) < 0)
@@ -321,7 +416,7 @@ static enum frame_decode decode_frame(
         if (++nb < cw_len)
             continue;
 
-        n = decode_block(sllr, cw_len, sf, h.cr, pnib, palt, pmarg);
+        n = decode_block(sllr, cw_len, sf, h.cr, pnib, palt, pmarg, pnorm);
         if (n < 0)
             return DECODE_HEADER;
         for (i = 0; i < (uint32_t)n && nnib < needed; i++)
@@ -329,6 +424,7 @@ static enum frame_decode decode_frame(
             nibs[nnib] = pnib[i];
             nalt[nnib] = palt[i];
             nmarg[nnib] = pmarg[i];
+            nnorm[nnib] = pnorm[i];
             nnib++;
         }
         nb = 0;
@@ -340,7 +436,8 @@ static enum frame_decode decode_frame(
     }
 
     enum frame_decode verdict = finish_frame(nibs, nnib, &h, out);
-    if (verdict == DECODE_CRC_BAD && chase_retry(nibs, nalt, nmarg, nnib, 2u * h.pay_len, &h, out))
+    if (verdict == DECODE_CRC_BAD &&
+        chase_retry(nibs, nmarg, nnorm, nalt, nnib, 2u * h.pay_len, &h, out))
         verdict = DECODE_CRC_OK;
     return verdict;
 }
