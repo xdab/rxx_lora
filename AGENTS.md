@@ -158,3 +158,15 @@ Data is written sequentially as pairs of interleaved 32-bit floating-point numbe
 
 **KISS** - this is a simple tool, every abstraction must earn its place.
 Don't overcomplicate things. Clean code beats even super comprehensive docs.
+
+**Method** - work here is measurement-driven; the full set of principles
+lives in `docs/method.md`. The ones that bind day-to-day:
+
+- Capture once, query many: collect raw inputs, raw outputs, and per-case
+  ground truth in one pass; every later question becomes a lookup.
+- Compare variants on identical randomness (paired A/B on common seeds), and
+  give a confound an arm that separates it.
+- When a result is impossible, suspect the analysis harness before the system
+  under test.
+- A test that cannot fail measures nothing; every verdict needs an
+  independent path to a "no."
