@@ -14,20 +14,19 @@ struct receiver;
  * Chase-II payload retry tuning: on a CRC fail, the k least-reliable payload
  * codewords are retried on their runner-up candidates, singles then pairs;
  * every CRC-passing combo is accepted by lowest total flip LLR loss, within
- * the tau budget. Off unless enabled; the CLI's --chase-* options set it.
+ * the tau budget. Off unless enabled; the CLI's --chase/--chase-k/--chase-tau
+ * set it. The suspicion gate (a suspect's margin must be under 0.2 of its
+ * LLR mass) is baked in the receiver: measured flat-optimal, no knob.
  */
 struct chase_config
 {
     int enabled; // run the retry at all
     int k;       // least-reliable codewords considered, 1..8
-    int singles; // max single-flip attempts, <0 = all
-    int pairs;   // max pair-flip attempts, <0 = all
-    float marg;  // max margin/LLR-mass ratio to flip, <0 = off
     float tau;   // max total flip LLR loss to accept, <0 = off
 };
 
-/** The defaults behind -c/--chase and the --chase-* tuning options. */
-#define CHASE_CONFIG_DEFAULTS {0, 4, -1, -1, 0.2f, 1.0f}
+/** The defaults behind --chase and the --chase-k/--chase-tau tuning options. */
+#define CHASE_CONFIG_DEFAULTS {0, 8, 1.0f}
 
 struct receiver_config
 {

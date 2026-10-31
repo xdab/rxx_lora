@@ -103,14 +103,24 @@ static int next_symbol(
     return 0;
 }
 
+// per-payload-codeword chase-retry record: the runner-up candidate, how far
+// behind it was (the flip's LLR loss) and the codeword's total LLR mass the
+// suspicion gate divides the margin by
+struct codeword_alt
+{
+    uint8_t alt; // runner-up candidate nibble
+    float marg;  // best minus second-best soft score
+    float norm;  // the codeword's LLR mass
+};
+
 /*
  * Deinterleave one block and soft-decode its codewords: the single
  * block-LLRs -> nibbles seam. Header: 8 symbols, sf-2 codewords, cr 4.
  * Payload: cr+4 symbols, sf codewords, the frame's cr.
  *
- * alt/marg optionally receive each codeword's runner-up candidate and
- * best-minus-second score (chase-retry fuel); norm the codeword's LLR mass
- * (margin gating divides by it); NULL skips.
+ * fuel optionally receives each codeword's chase-retry record — runner-up
+ * candidate, best-minus-second score (the flip's LLR loss) and the codeword's
+ * LLR mass the suspicion gate divides the margin by; NULL skips.
  *
  * @return the number of nibbles written, or -1 on a malformed block size
  */
@@ -120,9 +130,7 @@ static int decode_block(
     int n_cw,
     int cr,
     uint8_t *nib,
-    uint8_t *alt,
-    float *marg,
-    float *norm)
+    struct codeword_alt *fuel)
 {
     float cw_llr[MAX_SF][MAX_SF];
     int i;
@@ -134,15 +142,15 @@ static int decode_block(
 
     for (i = 0; i < n_cw; i++)
     {
-        if (norm)
+        if (fuel)
         {
             float s = 0;
             for (uint8_t j = 0; j < (uint8_t)(cr + 4); j++)
                 s += fabsf(cw_llr[i][j]);
-            norm[i] = s;
+            fuel[i].norm = s;
         }
         nib[i] = hamming_decode_soft(
-            cw_llr[i], (uint8_t)cr, alt ? &alt[i] : NULL, marg ? &marg[i] : NULL);
+            cw_llr[i], (uint8_t)cr, fuel ? &fuel[i].alt : NULL, fuel ? &fuel[i].marg : NULL);
     }
 
     return n_cw;
@@ -185,23 +193,22 @@ static enum frame_decode finish_frame(
 /*
  * Chase-II retry, CRC-arbitrated. From the K least-reliable payload
  * codewords — only those whose margin is a small fraction of their LLR mass
- * when margin gating is on (cc->marg): a certainly-correct codeword is
- * pure collision risk with no rescue upside. Runner-up flips are enumerated,
- * singles first, then pairs. Every CRC-passing combo is scored by the total
- * LLR loss of its flips (the first-pass decode is per-codeword ML, so a
- * genuine rescue loses little while a CRC collision usually loses a lot);
- * the cheapest one is accepted if its loss is within the evidence budget
- * cc->tau. A wrong combo must now be both CRC-consistent and metrically
- * plausible.
+ * (CHASE_MARG): a certainly-correct codeword is pure collision risk with no
+ * rescue upside. Runner-up flips are enumerated, singles first, then pairs.
+ * Every CRC-passing combo is scored by the total LLR loss of its flips (the
+ * first-pass decode is per-codeword ML, so a genuine rescue loses little
+ * while a CRC collision usually loses a lot); the cheapest one is accepted
+ * if its loss is within the evidence budget cc->tau. A wrong combo must now
+ * be both CRC-consistent and metrically plausible.
  *
  * @return 1 on a rescued frame (out filled), 0 if no combo verified
  */
+#define CHASE_MARG 0.2f // a suspect's margin must be under this share of its LLR mass
+
 static int chase_retry(
     const struct chase_config *cc,
     const uint8_t *nibs,
-    const float *marg,
-    const float *norm,
-    const uint8_t *alt,
+    const struct codeword_alt *fuel,
     uint32_t nnib,
     uint32_t pay_nib,
     const struct lora_header *h,
@@ -210,7 +217,7 @@ static int chase_retry(
     uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES] = {0};
     uint32_t sel[8];
     struct frame_result res, best_res;
-    float marg_max = cc->marg, tau = cc->tau;
+    float tau = cc->tau;
     float best_loss = 0;
     int k = cc->k, n_sel = 0, s, t, found = 0;
 
@@ -228,9 +235,9 @@ static int chase_retry(
         {
             if (used[i])
                 continue;
-            if (marg_max >= 0 && marg[i] > marg_max * norm[i])
+            if (fuel[i].marg > CHASE_MARG * fuel[i].norm)
                 continue;
-            if (best == pay_nib || marg[i] < marg[best])
+            if (best == pay_nib || fuel[i].marg < fuel[best].marg)
                 best = i;
         }
         if (best == pay_nib)
@@ -241,32 +248,27 @@ static int chase_retry(
 
     // singles, worst margin first: losses ascend with s, so the first pass
     // is also the cheapest single
-    int n_sing = cc->singles;
-    if (n_sing < 0 || n_sing > n_sel)
-        n_sing = n_sel;
-    for (s = 0; s < n_sing; s++)
+    for (s = 0; s < n_sel; s++)
     {
         memcpy(tmp, nibs, nnib);
-        tmp[sel[s]] = alt[sel[s]];
+        tmp[sel[s]] = fuel[sel[s]].alt;
         if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK)
         {
             found = 1;
-            best_loss = marg[sel[s]];
+            best_loss = fuel[sel[s]].marg;
             best_res = res;
             break;
         }
     }
 
     // pairs, in selection order
-    int n_pair = cc->pairs;
-    for (s = 1; s < n_sel && n_pair; s++)
-        for (t = 0; t < s && n_pair; t++)
+    for (s = 1; s < n_sel; s++)
+        for (t = 0; t < s; t++)
         {
-            float loss = marg[sel[s]] + marg[sel[t]];
-            n_pair--;
+            float loss = fuel[sel[s]].marg + fuel[sel[t]].marg;
             memcpy(tmp, nibs, nnib);
-            tmp[sel[s]] = alt[sel[s]];
-            tmp[sel[t]] = alt[sel[t]];
+            tmp[sel[s]] = fuel[sel[s]].alt;
+            tmp[sel[t]] = fuel[sel[t]].alt;
             if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
             {
                 found = 1;
@@ -300,9 +302,7 @@ static enum frame_decode decode_frame(
 {
     float sllr[HEADER_SYMBOLS][MAX_SF];
     uint8_t hnib[MAX_SF], nibs[2 * MAX_BYTES + 4];
-    uint8_t nalt[2 * MAX_BYTES + 4]; // chase-retry fuel: runner-up candidate
-    float nmarg[2 * MAX_BYTES + 4];  // margin and LLR mass per payload codeword
-    float nnorm[2 * MAX_BYTES + 4];  // (gating and flip-loss scoring use both)
+    struct codeword_alt fuel[2 * MAX_BYTES + 4]; // chase-retry fuel per codeword
     uint32_t nnib = 0, needed, i;
     uint8_t cw_len, nb = 0;
     struct lora_header h;
@@ -327,7 +327,7 @@ static enum frame_decode decode_frame(
     // referenced to the full channel bandwidth
     out->snr_db = 10.f * log10f(snr_acc / (float)HEADER_SYMBOLS);
 
-    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib, NULL, NULL, NULL) < 0)
+    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib, NULL) < 0)
         return DECODE_HEADER;
 
     if (decode_header(hnib, &h) != 0)
@@ -359,8 +359,8 @@ static enum frame_decode decode_frame(
     needed = 2u * h.pay_len + (h.has_crc ? 4u : 0u);
     while (nnib < needed)
     {
-        uint8_t pnib[MAX_SF], palt[MAX_SF];
-        float pmarg[MAX_SF], pnorm[MAX_SF];
+        uint8_t pnib[MAX_SF];
+        struct codeword_alt pfuel[MAX_SF];
         int n;
 
         if (next_symbol(src, fs, fd, pos, sllr[nb], st) < 0)
@@ -368,15 +368,13 @@ static enum frame_decode decode_frame(
         if (++nb < cw_len)
             continue;
 
-        n = decode_block(sllr, cw_len, sf, h.cr, pnib, palt, pmarg, pnorm);
+        n = decode_block(sllr, cw_len, sf, h.cr, pnib, pfuel);
         if (n < 0)
             return DECODE_HEADER;
         for (i = 0; i < (uint32_t)n && nnib < needed; i++)
         {
             nibs[nnib] = pnib[i];
-            nalt[nnib] = palt[i];
-            nmarg[nnib] = pmarg[i];
-            nnorm[nnib] = pnorm[i];
+            fuel[nnib] = pfuel[i];
             nnib++;
         }
         nb = 0;
@@ -389,7 +387,7 @@ static enum frame_decode decode_frame(
 
     enum frame_decode verdict = finish_frame(nibs, nnib, &h, out);
     if (verdict == DECODE_CRC_BAD && cc->enabled &&
-        chase_retry(cc, nibs, nmarg, nnorm, nalt, nnib, 2u * h.pay_len, &h, out))
+        chase_retry(cc, nibs, fuel, nnib, 2u * h.pay_len, &h, out))
         verdict = DECODE_CRC_OK;
     return verdict;
 }

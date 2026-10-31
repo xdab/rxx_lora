@@ -45,9 +45,13 @@ Remaining, in order:
 ### Chase retry: CRC-codeword flips
 
 The chase retry is landed (`chase_retry`, `src/receiver.c`), off by default,
-enabled per run with `-c/--chase`; defaults K=4, margin gate 0.2, LLR-loss
-arbitration budget 1.0, retunable via `--chase-k/--chase-marg/--chase-tau/
---chase-singles/--chase-pairs`.
+enabled per run with `--chase`; defaults K=8 suspects, LLR-loss arbitration
+budget 1.0, retunable via `--chase-k/--chase-tau`. The suspicion gate (a
+suspect's margin must be under 0.2 of its LLR mass) and the attempt budgets
+(unlimited) are baked: a 3000-trial paired matrix showed the gate
+flat-optimal at 0.2 (0.4 identical, 0.1 only loses rescues) and K live
+(+6..34% rescues over K=4, strictly additive, false-accept cost concentrated
+at the deepest reception).
 This entry is what it still cannot do. About 10 frames per 24k (SF9 sweep,
 `data/sweep.py`) fail the payload CRC with a byte-perfect payload: the four
 CRC codewords themselves decoded wrong. The chase never flips them (they are
@@ -73,16 +77,18 @@ fast (~24 per 24k for 1-4 attempts) and then jump (~50 at 8 pair attempts).
 
 ### Chase defaults beyond SF9 cr4/5 8B
 
-The baked defaults (K=4, marg 0.2, tau 1.0, via `-c/--chase`) were calibrated
-on one geometry only: SF9, CR 4/5, 8 B payloads, -21..-14 dB per-sample
-(`data/sweep.py`, paired 3000-trial sweeps). The τ budget is in absolute LLR
-units and the LLR scale moves with SNR and the demod's metric calibration,
-so τ's reach may differ at other SF/CR/payload lengths. Re-run the
-calibration grid (`--chase-marg`/`--chase-tau` via `bin/file_lora -c`, 300
-trials/point, then confirm at 3000) per geometry before trusting the
-defaults elsewhere; if the absolute τ does not generalize, normalize it (e.g.
-by the frame's median codeword LLR mass) instead of stacking per-geometry
-constants.
+The defaults (K=8, tau 1.0, via `--chase`) verified on the SF axis: SF7
+(-13..-10 dB), SF9 and SF11 knees, CR 4/5, 8 B, paired 3000-trial A/B
+(`data/chase_tune.py`, verdict caches in `data/`). Findings to not re-derive:
+K=8's rescues are strictly additive over K=4 (nested candidate sets; paired
+McNemar shows zero lost rescues in 12 comparisons, +7..+29 gained, all
+individually significant); its false-accept cost tracks frame-failure depth,
+not SF — zero at SF7/SF11 knees and SF9 -16, worst +8 corrupt frames per
+3000 at SF9 -17 (tau 1). tau beyond 1 pays the same depth tax harder
+(+22 fa at SF9 -17). The k/tau effects multiply: tight tau idles the extra
+suspects, loose tau activates their pairs. Still unverified: CR 4/6..4/8
+and payload lengths beyond 8 B, where codeword count and LLR mass per frame
+change.
 
 ### Header list decoding
 
