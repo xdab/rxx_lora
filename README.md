@@ -31,7 +31,7 @@ Naturally, the likes of `librtlsdr` are unavoidable if support for the actual de
 - [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers (for `rtl_lora`):
   - Debian/Ubuntu: `librtlsdr0` `librtlsdr-dev`
   - Fedora: `rtl-sdr` `rtl-sdr-devel`
-  - Arch: `rtl-sdr`
+  - Arch: `rtl-sdr` (AUR)
 - [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers (for `rsp_lora`;
   Linux only, and its `sdrplay_apiService` daemon must be running):
   - all distros: the vendor's `.run` installer

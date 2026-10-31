@@ -77,7 +77,7 @@ jobs:
           # source instead of pulling in an AUR helper
           - distro: archlinux
             install: |
-              pacman -Sy --noconfirm gcc make git cmake libusb fftw &&
+              pacman -Sy --noconfirm gcc make git cmake pkgconf libusb fftw &&
               git clone --depth 1 https://github.com/osmocom/rtl-sdr /tmp/rtl-sdr &&
               cmake -S /tmp/rtl-sdr -B /tmp/rtl-sdr/build -DCMAKE_INSTALL_PREFIX=/usr -DINSTALL_UDEV_RULES=OFF &&
               cmake --build /tmp/rtl-sdr/build --target install &&
