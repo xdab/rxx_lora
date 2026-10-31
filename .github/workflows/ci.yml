@@ -56,3 +56,35 @@ jobs:
 
       - name: Static analysis
         run: make tidy
+
+  # Portability proof: compile across distros/glibc/musl in containers.
+  # Build-only (no regression/fmt/tidy here — the ubuntu jobs above own those).
+  # rsp_lora is out of scope: it links the proprietary SDRplay API, which no
+  # distro packages (same scope decision as the tidy gate).
+  distro-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian:12
+            install: apt-get update && apt-get install -y gcc make git libfftw3-dev librtlsdr-dev
+          - distro: ubuntu:24.04
+            install: apt-get update && apt-get install -y gcc make git libfftw3-dev librtlsdr-dev
+          - distro: fedora:latest
+            install: dnf install -y gcc make git fftw-devel librtlsdr-devel
+          - distro: archlinux
+            install: pacman -Sy --noconfirm gcc make git fftw librtlsdr
+          # gcompat/libstdc++: the runner mounts glibc node20 for JS actions,
+          # which musl containers can't load without the compat layer
+          - distro: alpine:latest
+            install: apk add --no-cache build-base git fftw-dev librtlsdr-dev gcompat libstdc++
+    container: ${{ matrix.distro }}
+    steps:
+      - name: Install dependencies
+        run: ${{ matrix.install }}
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make bin/file_lora bin/rtl_lora
