@@ -44,8 +44,10 @@ Remaining, in order:
 
 ### Chase retry: CRC-codeword flips
 
-The chase retry is landed (`chase_retry`, `src/receiver.c`; margin gating
-`CHASE_MARG`=0.2, LLR-loss arbitration `CHASE_TAU`=1.0 baked as defaults, K=4).
+The chase retry is landed (`chase_retry`, `src/receiver.c`), off by default,
+enabled per run with `-c/--chase`; defaults K=4, margin gate 0.2, LLR-loss
+arbitration budget 1.0, retunable via `--chase-k/--chase-marg/--chase-tau/
+--chase-singles/--chase-pairs`.
 This entry is what it still cannot do. About 10 frames per 24k (SF9 sweep,
 `data/sweep.py`) fail the payload CRC with a byte-perfect payload: the four
 CRC codewords themselves decoded wrong. The chase never flips them (they are
@@ -71,12 +73,12 @@ fast (~24 per 24k for 1-4 attempts) and then jump (~50 at 8 pair attempts).
 
 ### Chase defaults beyond SF9 cr4/5 8B
 
-The baked defaults (K=4, `CHASE_MARG`=0.2, `CHASE_TAU`=1.0) were calibrated
+The baked defaults (K=4, marg 0.2, tau 1.0, via `-c/--chase`) were calibrated
 on one geometry only: SF9, CR 4/5, 8 B payloads, -21..-14 dB per-sample
 (`data/sweep.py`, paired 3000-trial sweeps). The τ budget is in absolute LLR
 units and the LLR scale moves with SNR and the demod's metric calibration,
 so τ's reach may differ at other SF/CR/payload lengths. Re-run the
-calibration grid (`CHASE_MARG`/`CHASE_TAU` via `bin/file_lora.exp`, 300
+calibration grid (`--chase-marg`/`--chase-tau` via `bin/file_lora -c`, 300
 trials/point, then confirm at 3000) per geometry before trusting the
 defaults elsewhere; if the absolute τ does not generalize, normalize it (e.g.
 by the frame's median codeword LLR mass) instead of stacking per-geometry

@@ -34,12 +34,17 @@ static void usage(void)
                  "Use:\t" APP_NAME " --center-freq HZ [-options]\n"
                  "\t[-d SEL] RSP device: index (default: 0) or serial-number\n"
                  "\t         substring\n"
-                 "\t[-s sf]  spreading factor, 5..12 (default: 7)\n"
+                 "\t[-s sf]  spreading factor, 5..12 (default: 9)\n"
                  "\t[-o os]  oversampling factor, 1..255 (default: 4)\n"
                  "\t[-p pre] preamble detection windows to average (default: 8)\n"
                  "\t[-a avg] detector correlation budget K, 1..255 (default: 4)\n"
                  "\t[-w id]  hex sync word to filter by: 0x12 gr-lora,\n"
                  "\t         0x2b Meshtastic; omit to accept any\n"
+                 "\t[-c]     chase-II retry: on a payload CRC fail, re-decode the\n"
+                 "\t         least-reliable codewords on their runner-ups\n"
+                 "\t[--chase-k N] [--chase-marg X] [--chase-tau X]\n"
+                 "\t[--chase-singles N] [--chase-pairs N] retry tuning with -c\n"
+                 "\t         (defaults: 4, 0.2, 1.0, unlimited, unlimited)\n"
                  "\t[-g db]  IF gain reduction, 0..59 dB (default: automatic);\n"
                  "\t         giving -g or -L selects manual gain\n"
                  "\t[-L n]   LNA state (RSP1: 0..2, 0 = max gain)\n"
@@ -88,6 +93,7 @@ int main(int argc, char **argv)
     int preamble_avg = 8;
     int detect_avg = 4;
     long sync_word_filter = 0;
+    struct chase_config chase = CHASE_CONFIG_DEFAULTS;
     int conjugate_iq = 0;
     int dc_block = 0;
     double center_freq = 0.0; // required: an RSP must be tuned
@@ -104,7 +110,12 @@ int main(int argc, char **argv)
         OPT_DC_BLOCK,
         OPT_CENTER_FREQ,
         OPT_BW,
-        OPT_INPUT_RATE
+        OPT_INPUT_RATE,
+        OPT_CHASE_K,
+        OPT_CHASE_MARG,
+        OPT_CHASE_TAU,
+        OPT_CHASE_SINGLES,
+        OPT_CHASE_PAIRS
     };
     static const struct option long_opts[] = {
         {"conj", no_argument, NULL, OPT_CONJ},
@@ -112,11 +123,17 @@ int main(int argc, char **argv)
         {"center-freq", required_argument, NULL, OPT_CENTER_FREQ},
         {"bw", required_argument, NULL, OPT_BW},
         {"input-rate", required_argument, NULL, OPT_INPUT_RATE},
+        {"chase", no_argument, NULL, 'c'},
+        {"chase-k", required_argument, NULL, OPT_CHASE_K},
+        {"chase-marg", required_argument, NULL, OPT_CHASE_MARG},
+        {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
+        {"chase-singles", required_argument, NULL, OPT_CHASE_SINGLES},
+        {"chase-pairs", required_argument, NULL, OPT_CHASE_PAIRS},
         {NULL, 0, NULL, 0},
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "d:s:o:p:a:w:g:L:v::q::R:x:", long_opts, NULL)) != -1)
+    while ((opt = getopt_long(argc, argv, "d:s:o:p:a:w:g:L:v::q::R:x:c", long_opts, NULL)) != -1)
     {
         switch (opt)
         {
@@ -137,6 +154,24 @@ int main(int argc, char **argv)
             break;
         case 'w':
             sync_word_filter = (long)strtoul(optarg, NULL, 0);
+            break;
+        case 'c':
+            chase.enabled = 1;
+            break;
+        case OPT_CHASE_K:
+            chase.k = (int)strtol(optarg, NULL, 10);
+            break;
+        case OPT_CHASE_MARG:
+            chase.marg = strtof(optarg, NULL);
+            break;
+        case OPT_CHASE_TAU:
+            chase.tau = strtof(optarg, NULL);
+            break;
+        case OPT_CHASE_SINGLES:
+            chase.singles = (int)strtol(optarg, NULL, 10);
+            break;
+        case OPT_CHASE_PAIRS:
+            chase.pairs = (int)strtol(optarg, NULL, 10);
             break;
         case 'g':
             gain_rdb = (int)strtol(optarg, NULL, 10);
@@ -186,7 +221,8 @@ int main(int argc, char **argv)
     if (preamble_avg < 6 || sf < 5 || sf > 12 || os < 1 || os > 255 || detect_avg < 1 ||
         detect_avg > 255 || sync_word_filter < 0 || sync_word_filter > 0xff || center_freq <= 0.0 ||
         bandwidth <= 0.0 || capture_rate < 0.0 || timeout_s < 0.0 || gain_rdb < -1 ||
-        gain_rdb > 59 || lna_state < -1 || lna_state > 9)
+        gain_rdb > 59 || lna_state < -1 || lna_state > 9 || chase.k < 1 || chase.k > 8 ||
+        chase.singles < -1 || chase.pairs < -1)
     {
         if (center_freq <= 0.0)
             (void)fprintf(stderr, "RSP needs --center-freq\n");
@@ -253,8 +289,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    struct receiver *rx =
-        receiver_create(sf, os, preamble_avg, sync_word_filter, detect_avg, center_freq, bandwidth);
+    struct receiver *rx;
+    {
+        struct receiver_config cfg = {
+            .sf = sf,
+            .os = os,
+            .preamble_avg = preamble_avg,
+            .sync_word = sync_word_filter,
+            .detect_avg = detect_avg,
+            .center_freq = center_freq,
+            .bandwidth = bandwidth,
+            .chase = chase,
+        };
+        rx = receiver_create(&cfg);
+    }
     if (!rx)
     {
         source_destroy(src);
@@ -282,6 +330,15 @@ int main(int argc, char **argv)
         log_info("filtering by sync word (net-id) 0x%02lx\n", sync_word_filter);
     else
         log_info("no sync word filter (any net-id accepted)\n");
+
+    if (chase.enabled)
+        log_info(
+            "chase-II retry on: k=%d marg=%g tau=%g singles=%d pairs=%d\n",
+            chase.k,
+            (double)chase.marg,
+            (double)chase.tau,
+            chase.singles,
+            chase.pairs);
 
     log_info("listening... (Ctrl-C to stop)\n");
 

@@ -39,6 +39,7 @@ struct receiver
 {
     struct frame_sync *fs;
     struct demod_state demod; // allocated once, reset per frame
+    struct chase_config chase;
     int sf;
 };
 
@@ -181,72 +182,22 @@ static enum frame_decode finish_frame(
     return crc_rx == crc_calc ? DECODE_CRC_OK : DECODE_CRC_BAD;
 }
 
-static int chase_k(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: retry selection size, 0 disables
-    const char *e = getenv("CHASE_K");
-    int k = e ? atoi(e) : 4;
-    return k > 8 ? 8 : (k < 0 ? 0 : k);
-#else
-    return 4;
-#endif
-}
-
-static int chase_singles(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: max single-flip attempts, <0 = all
-    const char *e = getenv("CHASE_SINGLES");
-    return e ? atoi(e) : -1;
-#else
-    return -1;
-#endif
-}
-
-static int chase_pairs(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: max pair-flip attempts, <0 = all
-    const char *e = getenv("CHASE_PAIRS");
-    return e ? atoi(e) : -1;
-#else
-    return -1;
-#endif
-}
-
-static float chase_marg(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: max margin/LLR-mass ratio to flip, <0 = off
-    const char *e = getenv("CHASE_MARG");
-    return e ? strtof(e, NULL) : 0.2f;
-#else
-    return 0.2f;
-#endif
-}
-
-static float chase_tau(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: max total flip LLR loss to accept, <0 = off
-    const char *e = getenv("CHASE_TAU");
-    return e ? strtof(e, NULL) : 1.0f;
-#else
-    return 1.0f;
-#endif
-}
-
 /*
  * Chase-II retry, CRC-arbitrated. From the K least-reliable payload
  * codewords — only those whose margin is a small fraction of their LLR mass
- * when margin gating is on (CHASE_MARG): a certainly-correct codeword is
+ * when margin gating is on (cc->marg): a certainly-correct codeword is
  * pure collision risk with no rescue upside. Runner-up flips are enumerated,
  * singles first, then pairs. Every CRC-passing combo is scored by the total
  * LLR loss of its flips (the first-pass decode is per-codeword ML, so a
  * genuine rescue loses little while a CRC collision usually loses a lot);
  * the cheapest one is accepted if its loss is within the evidence budget
- * CHASE_TAU. A wrong combo must now be both CRC-consistent and metrically
+ * cc->tau. A wrong combo must now be both CRC-consistent and metrically
  * plausible.
  *
  * @return 1 on a rescued frame (out filled), 0 if no combo verified
  */
 static int chase_retry(
+    const struct chase_config *cc,
     const uint8_t *nibs,
     const float *marg,
     const float *norm,
@@ -259,9 +210,9 @@ static int chase_retry(
     uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES] = {0};
     uint32_t sel[8];
     struct frame_result res, best_res;
-    float marg_max = chase_marg(), tau = chase_tau();
+    float marg_max = cc->marg, tau = cc->tau;
     float best_loss = 0;
-    int k = chase_k(), n_sel = 0, s, t, found = 0;
+    int k = cc->k, n_sel = 0, s, t, found = 0;
 
     if (k < 1 || pay_nib == 0 || pay_nib > nnib)
         return 0;
@@ -290,7 +241,7 @@ static int chase_retry(
 
     // singles, worst margin first: losses ascend with s, so the first pass
     // is also the cheapest single
-    int n_sing = chase_singles();
+    int n_sing = cc->singles;
     if (n_sing < 0 || n_sing > n_sel)
         n_sing = n_sel;
     for (s = 0; s < n_sing; s++)
@@ -307,7 +258,7 @@ static int chase_retry(
     }
 
     // pairs, in selection order
-    int n_pair = chase_pairs();
+    int n_pair = cc->pairs;
     for (s = 1; s < n_sel && n_pair; s++)
         for (t = 0; t < s && n_pair; t++)
         {
@@ -344,7 +295,8 @@ static enum frame_decode decode_frame(
     struct demod_state *fd,
     size_t *pos,
     struct frame_result *out,
-    struct frame_sync_status *st)
+    struct frame_sync_status *st,
+    const struct chase_config *cc)
 {
     float sllr[HEADER_SYMBOLS][MAX_SF];
     uint8_t hnib[MAX_SF], nibs[2 * MAX_BYTES + 4];
@@ -436,8 +388,8 @@ static enum frame_decode decode_frame(
     }
 
     enum frame_decode verdict = finish_frame(nibs, nnib, &h, out);
-    if (verdict == DECODE_CRC_BAD &&
-        chase_retry(nibs, nmarg, nnorm, nalt, nnib, 2u * h.pay_len, &h, out))
+    if (verdict == DECODE_CRC_BAD && cc->enabled &&
+        chase_retry(cc, nibs, nmarg, nnorm, nalt, nnib, 2u * h.pay_len, &h, out))
         verdict = DECODE_CRC_OK;
     return verdict;
 }
@@ -597,36 +549,30 @@ static void report_frame(
     output_frame(&rec);
 }
 
-struct receiver *receiver_create(
-    int sf,
-    int os,
-    int preamble_avg,
-    long sync_word,
-    int detect_avg,
-    double center_freq,
-    double bandwidth)
+struct receiver *receiver_create(const struct receiver_config *cfg)
 {
     struct receiver *r = calloc(1, sizeof(*r));
 
     if (!r)
         return NULL;
 
-    r->sf = sf;
+    r->chase = cfg->chase;
+    r->sf = cfg->sf;
     r->fs = frame_sync_create(
-        (uint8_t)sf,
-        (uint8_t)os,
-        (uint16_t)preamble_avg,
-        (uint32_t)sync_word,
-        (uint32_t)center_freq,
-        (uint32_t)bandwidth,
-        (uint8_t)detect_avg);
+        (uint8_t)cfg->sf,
+        (uint8_t)cfg->os,
+        (uint16_t)cfg->preamble_avg,
+        (uint32_t)cfg->sync_word,
+        (uint32_t)cfg->center_freq,
+        (uint32_t)cfg->bandwidth,
+        (uint8_t)cfg->detect_avg);
     if (!r->fs)
     {
         free(r);
         return NULL;
     }
 
-    if (demod_init(&r->demod, (uint8_t)sf) < 0)
+    if (demod_init(&r->demod, (uint8_t)cfg->sf) < 0)
     {
         frame_sync_destroy(r->fs);
         free(r);
@@ -677,7 +623,8 @@ int receiver_run(struct receiver *r, struct source *src)
             n_synced++;
 
             demod_reset(&r->demod, st.cfo);
-            enum frame_decode verdict = decode_frame(src, fs, &r->demod, &pos, &res, &st);
+            enum frame_decode verdict =
+                decode_frame(src, fs, &r->demod, &pos, &res, &st, &r->chase);
 
             switch (verdict)
             {
