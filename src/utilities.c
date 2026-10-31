@@ -12,6 +12,24 @@
 // Reference: [gr-lora_sdr] utilities.h:50
 long util_mod(long a, long b) { return (a % b + b) % b; }
 
+float util_modf(float v, uint32_t n)
+{
+    v = fmodf(v, (float)n);
+    if (v < 0.0f)
+        v += (float)n;
+    return v;
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (value, modulus)
+float util_wrap(float v, uint32_t n)
+{
+    float m = (float)n;
+    v = fmodf(v + m / 2.0f, m);
+    if (v < 0.0f)
+        v += m;
+    return v - m / 2.0f;
+}
+
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:114
 int util_round(float number) { return (int)(number > 0 ? number + 0.5f : ceilf(number - 0.5f)); }
 

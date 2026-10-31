@@ -19,54 +19,6 @@
 // port-side: exact resync period for the sliding detect-mean sum, in windows
 #define DETECT_SUM_RESYNC 1024
 
-// argmax of the 3-bin energy sum (b-1, b, b+1); tolerates a tone spread over
-// neighbors by residual fractional STO
-static int argmax_3bin(const float *mag, uint32_t n)
-{
-    int best = 0;
-    float best_score = -1.0f;
-
-    for (uint32_t b = 0; b < n; b++)
-    {
-        float score = mag[b] + mag[(b + 1) % n] + mag[(b + n - 1) % n];
-        if (score > best_score)
-        {
-            best_score = score;
-            best = (int)b;
-        }
-    }
-
-    return best;
-}
-
-/* Fused 3-bin energy argmax over two dechirped magnitude rows: row b rotated
- * by `shift` bins so its tone lands on row a's expected pair bin, then summed.
- * The noncoherent fusion of the (w0, w1) sync pair carries ~3 dB more energy
- * than either single-window vote; the argmax sits at V + w0. */
-static int argmax_3bin_fused(const float *a, const float *b, int shift, uint32_t n)
-{
-    int best = 0;
-    float best_score = -1.0f;
-
-    for (uint32_t k = 0; k < n; k++)
-    {
-        long kp = util_mod((long)k + 1, (long)n);
-        long km = util_mod((long)k - 1, (long)n);
-        long sp = util_mod((long)k + 1 + shift, (long)n);
-        long sm = util_mod((long)k - 1 + shift, (long)n);
-        long s0 = util_mod((long)k + shift, (long)n);
-
-        float score = a[km] + a[k] + a[kp] + b[sm] + b[s0] + b[sp];
-        if (score > best_score)
-        {
-            best_score = score;
-            best = (int)k;
-        }
-    }
-
-    return best;
-}
-
 // deviation; baseline: [gr-lora_sdr] frame_sync_impl.cc:348 (raw argmax)
 static int get_symbol_val_detect(
     struct frame_sync *s, const float complex *samples, const float complex *ref_chirp)
@@ -173,110 +125,6 @@ static int get_symbol_val_detect(
     return decision;
 }
 
-/* Settle the symbol grid from the sync word itself instead of guessing how
- * many preamble upchirps follow. Every preamble upchirp dechirps to one value
- * V; the two sync symbols to V + sync_words[0] and V + sync_words[1] — a
- * signature independent of the unknown carrier offset. The fractional CFO is
- * estimated first (Bernier) and rotated out of every scanned window, V is the
- * argmax of the noncoherent sum of the corrected preamble spectra, and each
- * scanned value is the 3-bin energy argmax. When the scan cannot confirm the
- * pair it leaves `lead` at 1, i.e. the reference's own coarse sync.
- *
- * @return the windows from the fire window to the first sync symbol
- */
-static int detect_sync_lead(struct frame_sync *s, const float complex *in)
-{
-    const uint32_t n = s->number_of_bins;
-    const int ust = s->n_up_req - 1;
-
-    float cfo_frac = frame_sync_estimate_cfo_frac_bernier(s, &s->preamble_raw[n - s->k_hat]);
-    for (uint32_t j = 0; j < n; j++)
-        s->cfo_correc[j] = cexpf(I * (-2.0f * (float)M_PI * cfo_frac / (float)n * (float)j));
-
-    int V = -1;
-    float best_e = 0.0f;
-    for (uint32_t b = 0; b < n; b++)
-        s->est_fft_mag[b] = 0.0f;
-
-    /* V must come off the same detect grid the scanned windows are on:
-     * preamble_raw's unshifted windows, rotated by cfo_correc so each tone
-     * sits unsplit on k_hat. */
-    for (int i = 0; i < ust; i++)
-    {
-        for (uint32_t j = 0; j < n; j++)
-            s->in_down[j] = s->preamble_raw[(uint32_t)i * n + j] * s->cfo_correc[j];
-        frame_sync_get_symbol_val(s, s->in_down, s->downchirp);
-        for (uint32_t b = 0; b < n; b++)
-            s->est_fft_mag[b] += s->fft_mag[b];
-    }
-    for (uint32_t b = 0; b < n; b++)
-        if (s->est_fft_mag[b] > best_e)
-        {
-            best_e = s->est_fft_mag[b];
-            V = (int)b;
-        }
-
-    /* four_cum Move A (this port): fuse the (w0, w1) sync pair into one
-     * noncoherent decision instead of ANDing two independent argmax votes —
-     * keep the previous window's magnitude row (est_fft_mag, free after the V
-     * estimate above), sum it with the current one at the known pair shift
-     * dw = w1 - w0, and accept when the fused 3-bin argmax lands on V + w0.
-     * The fused pair carries ~3 dB more energy than either single-window
-     * vote. */
-    int vals[SYNC_LOOKAHEAD + 1];
-    int want0 = (int)s->sync_words[0];
-    int want1 = s->sync_words[1] ? (int)s->sync_words[1] : want0;
-    int dw = want1 - want0;
-    float *prev_mag = s->est_fft_mag;
-    int lead = 1; // windows from here to the first sync symbol
-    int found = 0;
-    int m = 0;
-
-    /* one window behind the fire: with detect_avg > 1 the averaged decision
-     * lags far enough that DETECT can fire on netid2's own window, putting
-     * the pair one window in the PAST */
-    for (; m <= SYNC_LOOKAHEAD; m++)
-    {
-        frame_sync_downsample_prologue(s, in + (size_t)(m - 1) * s->samples_per_symbol, s->in_down);
-        for (uint32_t j = 0; j < n; j++)
-            s->in_down[j] *= s->cfo_correc[j];
-        if (frame_sync_get_symbol_val(s, s->in_down, s->downchirp) < 0 && m > 0)
-            break;
-        vals[m] = argmax_3bin(s->fft_mag, n);
-        if (m > 0 && V >= 0)
-        {
-            int fb = argmax_3bin_fused(prev_mag, s->fft_mag, dw, n);
-            int danch = (int)util_mod((long)fb - (V + want0), (long)n);
-            if (danch > (int)n / 2)
-                danch -= (int)n;
-            if (abs(danch) <= 2)
-            {
-                lead = (m - 1) - 1;
-                found = 1;
-                break;
-            }
-        }
-        memcpy(prev_mag, s->fft_mag, n * sizeof(*prev_mag));
-    }
-
-    log_trace(
-        "detect: look-ahead V=%d lead=%d found=%d over %d windows"
-        " (cfo_frac=%+.3f)\n",
-        V,
-        lead,
-        found,
-        m,
-        (double)cfo_frac);
-
-    char vals_line[128]; // SYNC_LOOKAHEAD+2 short ints fit easily
-    int off = snprintf(vals_line, sizeof(vals_line), "detect: vals:");
-    for (int i = 0; i < m && off < (int)sizeof(vals_line) - 1; i++)
-        off += snprintf(vals_line + off, sizeof(vals_line) - (size_t)off, " %d", vals[i]);
-    log_trace("%s\n", vals_line);
-
-    return lead;
-}
-
 /* DETECT-path deviations from the reference's raw argmax, which flaps +-2 bins
  * on a two-tone window: 3-bin energy sums, optional mean over detect_avg
  * spectra, half-bin tie-break. */
@@ -328,11 +176,9 @@ int frame_sync_detect_step(
 
     if (s->symbol_cnt == s->n_up_req)
     {
-        /* preamble_raw's first n_up_req windows are the run's decimated
-         * windows, archived as they were decided (the prologue is
-         * state-deterministic in DETECT, so re-decimating the raw windows
-         * would reproduce them); the remaining three slots are SYNC's. */
-        s->phase = FS_SYNC;
+        // preamble_raw: the run's decimated windows (the DETECT prologue is
+        // state-deterministic, re-decimation reproduces them); the slots
+        // past n_up_req are SYNC's
         s->symbol_cnt = 0;
         s->additional_upchirps = 0;
         s->k_hat =
@@ -344,15 +190,32 @@ int frame_sync_detect_step(
             return -1;
         }
 
-        int lead = detect_sync_lead(s, in);
+        struct sfd_result sfd;
+        if (!sfd_locate(s, in, &sfd))
+        {
+            // no SFD behind the fire; 0 = the receiver consumes one window
+            memcpy(s->preamble_raw, s->in_down, s->number_of_bins * sizeof(*s->in_down));
+            s->symbol_cnt = 1;
+            if (st)
+                frame_sync_status(s, st);
+            return 0;
+        }
 
+        s->phase = FS_SYNC;
+
+        // netid1 on the reference's window lattice (fire + os*(N - k_hat)
+        // mod sps): the downstream estimators read whole-bin tones; the SFD
+        // edge only picks the lattice window
+        int64_t os64 = (int64_t)s->oversampling_factor;
+        int64_t sps64 = (int64_t)s->samples_per_symbol;
+        int64_t lattice = os64 * ((int64_t)s->number_of_bins - s->k_hat) % sps64;
+        double netid1 = (double)sfd.t_edge + (double)sfd.t_frac - 2.0 * (double)sps64;
+        s->coarse_consume =
+            lattice + (int64_t)llround((netid1 - (double)lattice) / (double)sps64) * sps64;
         memcpy(
             s->net_id_samp,
-            &in[(int)(0.75 * s->samples_per_symbol - s->k_hat * s->oversampling_factor)],
-            (size_t)(0.25 * s->samples_per_symbol) * sizeof(*s->net_id_samp));
-
-        s->coarse_consume = (int64_t)s->oversampling_factor * (s->number_of_bins - s->k_hat) +
-                            (int64_t)(lead - 1) * s->samples_per_symbol;
+            &in[s->coarse_consume - sps64 / 4],
+            (size_t)(s->samples_per_symbol / 4) * sizeof(*s->net_id_samp));
         *advance = s->coarse_consume;
         if (st)
             frame_sync_status(s, st);

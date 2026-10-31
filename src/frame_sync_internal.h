@@ -31,6 +31,60 @@ enum frame_sync_subphase
     FS_QUARTER_DOWN,
 };
 
+/** Anti-alias FIR length for the SFD slot pipeline (src/sfd.c). */
+#define SFD_FIR_TAPS 65
+
+/** Fine-pass reference spectra: down-ref and up-ref slots (x 4N each). */
+#define SFD_FINE_DN 10
+#define SFD_FINE_UP 6
+
+/** Pairing representatives: (tau, f) and (tau +- N/2, f +- N/2) at most. */
+#define SFD_MAX_TAU_REPS 3
+
+/** One fine-pass hypothesis: a scored slot shift. */
+struct sfd_cand
+{
+    float lam;    // fine score in noise-power units
+    int64_t base; // candidate SFD edge, samples relative to the fire window
+    float tau;    // the representative's timing offset, bins
+    float u;      // re-locked tone on the re-timed grid, bins
+};
+
+/** SFD-first coarse sync (src/sfd.c): the slot pipeline's plans and scratch. */
+struct sfd
+{
+    float fir[SFD_FIR_TAPS]; // anti-alias FIR before the os-decimation
+    void *slot_fft_cfg;      // 4N-point FFT plan (slot spectra)
+    void *lock_fft_cfg;      // coherent-lock FFT plan, lock_len points
+    uint32_t lock_len;       // zero-padded lock FFT length (power of two)
+    dsp_cpx *cx_in;          // FFT input scratch shared by both plans
+    dsp_cpx *cx_out;         // FFT output scratch shared by both plans
+    float complex *slot;     // one decimated slot (N)
+    float *lockmag;          // lock magnitude spectrum (lock_len)
+    float *mag;              // one slot magnitude spectrum (4N)
+    float *dmag0;            // change-point D spectra (4N each)
+    float *dmag1;
+    float *dsum;    // sqrt-power-sum scratch over the D pair (4N)
+    float *med;     // median scratch (4N)
+    float *fine_dn; // fine-pass down-ref spectra (SFD_FINE_DN x 4N)
+    float *fine_up; // fine-pass up-ref spectra (SFD_FINE_UP x 4N)
+};
+
+/** SFD-first coarse-sync outcome (src/sfd.c): the frame-grid decision at the
+ *  DETECT fire. */
+struct sfd_result
+{
+    int64_t t_edge; // SFD symbol start, samples relative to the fire window
+    float t_frac;   // t_edge's sub-sample remainder (the tau rounding residue)
+    int q;          // change-point SFD candidate, windows past the fire
+    float u;        // lock tone f + tau on the fire grid, bins
+    float d;        // change-point downchirp tone f - tau, bins
+    float tau;      // resolved timing offset, bins
+    float f;        // resolved CFO on the re-timed grid, bins
+    float lam;      // fine score in noise-power units
+    float margin;   // lam lead over the best other hypothesis
+};
+
 /**
  * Frame synchronization state. The configuration fields are constructor
  * arguments; the result fields are mirrored to the caller through
@@ -114,6 +168,8 @@ struct frame_sync
     uint8_t detect_hist_fill; // windows currently in the ring
     uint8_t detect_hist_pos;  // next ring slot
     uint32_t detect_win_cnt;  // windows since the last exact sum resync
+    // SFD-first coarse sync (src/sfd.c): the slot pipeline run at the fire
+    struct sfd sfd;
 };
 
 /**
@@ -170,5 +226,50 @@ void frame_sync_downsample_prologue(
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:194.
  */
 float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float complex *samples);
+
+/** @brief Allocate the slot pipeline's buffers and FFT plans, and design its
+ *        anti-alias FIR. @return 0, or -1 on allocation failure. */
+int sfd_alloc(struct frame_sync *s);
+
+/** @brief Release everything sfd_alloc() allocated. */
+void sfd_free(struct frame_sync *s);
+
+/** @brief Pairing identity: (u, d) -> the N/2-deduplicated tau representatives
+ *        in @p taus. @return the representative count */
+int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS]);
+
+/** @brief Median power of a magnitude spectrum; @p scratch (len floats) is
+ *        reordered in place. */
+float sfd_median_power(float *scratch, const float *mag, uint32_t len);
+
+/** @brief Fine score of one slot shift: known-bin evidence in noise-power
+ *        units. @p dn / @p up are the representative's reference spectra
+ *        (SFD_FINE_DN / SFD_FINE_UP rows of 4N), indexed by @p shift;
+ *        sync_words[0] != 0 adds the net-id terms. */
+float sfd_shift_lam(
+    const float *dn,
+    const float *up,
+    uint32_t n,
+    int shift,
+    float u_r,
+    float sigma2,
+    const uint16_t *sync_words);
+
+/** @brief Best candidate by lam; the margin over the best other through
+ *        @p margin. @return the winner's index */
+int sfd_select(const struct sfd_cand *c, int n, float *margin);
+
+/**
+ * @brief The SFD-first coarse sync: locate the SFD, resolve the timing/CFO
+ *        pair, score the re-timed grid.
+ *
+ * Lam-gated (noise-calibrated p_0.001, worded mode only). Reads raw slots up
+ * to SYNC_LOOKAHEAD windows either side of @p in (the source's retention).
+ *
+ * @param[in] in the fire window start; the retention span must be readable
+ * @param[out] r the grid decision (t_edge, tau, f) and the score diagnostics
+ * @return 1 on an accepted SFD lock, 0 on a gate rejection or no hypothesis
+ */
+int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result *r);
 
 #endif // FRAME_SYNC_INTERNAL_H

@@ -16,6 +16,16 @@
 long util_mod(long a, long b);
 
 /**
+ * @brief util_mod() on floats: result in [0, n).
+ */
+float util_modf(float v, uint32_t n);
+
+/**
+ * @brief util_modf() centered on zero: result in (-n/2, n/2].
+ */
+float util_wrap(float v, uint32_t n);
+
+/**
  * @brief Round half away from zero, as the reference's my_roundf.
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:114.
  */

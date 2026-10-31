@@ -1,6 +1,7 @@
 /*
  * Complex one-dimensional FFT, a thin wrapper over FFTW3f; the streaming DC
- * blocker; and a Kaiser-windowed sinc low-pass prototype designer.
+ * blocker; a Kaiser-windowed sinc low-pass prototype designer; and a parabolic
+ * fractional spectral peak reader.
  *
  * Plans are created once per transform size on private planner arrays and
  * driven through fftwf_execute_dft(), so the caller's own buffers are
@@ -14,6 +15,7 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 // dsp_cpx and fftwf_complex are both two contiguous floats.
@@ -172,4 +174,23 @@ void dc_block_apply(struct dc_block *d, float complex *x, size_t n)
     }
     d->x1 = x1;
     d->y1 = y1;
+}
+
+float dsp_frac_peak(const float *sp, uint32_t len, float *pk)
+{
+    uint32_t k = 0;
+    for (uint32_t i = 1; i < len; i++)
+        if (sp[i] > sp[k])
+            k = i;
+
+    uint32_t km = (k + len - 1) % len, kp = (k + 1) % len;
+    float dl = 0.5f * (sp[km] - sp[kp]) / (sp[km] - 2.0f * sp[k] + sp[kp] + 1e-12f);
+    if (dl > 1.0f)
+        dl = 1.0f;
+    if (dl < -1.0f)
+        dl = -1.0f;
+
+    if (pk)
+        *pk = sp[k];
+    return (float)k + dl;
 }

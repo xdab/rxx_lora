@@ -85,7 +85,7 @@ python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4
 
 End-to-end simulation under AWGN shows satisfactory results.
 
-For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1–2 dB** of theoretical performance at SNRs above -15 dB.
+For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1 dB** of theoretical performance at SNRs above -16 dB.
 
 | BER vs SNR under AWGN                                             |
 | ----------------------------------------------------------------- |
