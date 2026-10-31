@@ -253,7 +253,9 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
         float t = util_wrap(raw_taus[i], n);
         int dup = 0;
         for (int j = 0; j < ntau; j++)
-            if (taus[j] == t)
+            // float wrap leaves the +-N/2 pair epsilon apart; an exact
+            // compare duplicates the whole candidate set
+            if (fabsf(taus[j] - t) < 0.5f)
                 dup = 1;
         if (!dup)
             taus[ntau++] = t;
