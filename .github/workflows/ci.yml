@@ -72,9 +72,16 @@ jobs:
           - distro: ubuntu:24.04
             install: apt-get update && apt-get install -y gcc make git libfftw3-dev librtlsdr-dev
           - distro: fedora:latest
-            install: dnf install -y gcc make git fftw-devel librtlsdr-devel
+            install: dnf install -y gcc make git fftw-devel rtl-sdr-devel
+          # librtlsdr is AUR-only on Arch; build rtl-sdr from the osmocom
+          # source instead of pulling in an AUR helper
           - distro: archlinux
-            install: pacman -Sy --noconfirm gcc make git fftw librtlsdr
+            install: |
+              pacman -Sy --noconfirm gcc make git cmake libusb fftw &&
+              git clone --depth 1 https://github.com/osmocom/rtl-sdr /tmp/rtl-sdr &&
+              cmake -S /tmp/rtl-sdr -B /tmp/rtl-sdr/build -DCMAKE_INSTALL_PREFIX=/usr -DINSTALL_UDEV_RULES=OFF &&
+              cmake --build /tmp/rtl-sdr/build --target install &&
+              ldconfig
           # gcompat/libstdc++: the runner mounts glibc node20 for JS actions,
           # which musl containers can't load without the compat layer
           - distro: alpine:latest
