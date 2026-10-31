@@ -3,6 +3,7 @@
 
 #include <complex.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * Complex sample pair of the FFT buffers.
@@ -75,5 +76,12 @@ void dc_block_apply(struct dc_block *d, float complex *x, size_t n);
  * Reference: Kaiser window [Kaiser:1980]; taper parameter from [Kaiser:1974].
  */
 void dsp_kaiser_lowpass(unsigned n, float fc, float as, float *h);
+
+/**
+ * @brief Parabolic fractional peak of a magnitude spectrum: the interpolated
+ *        bin of the maximum (in array units), its magnitude through @p pk
+ *        (optional, may be NULL).
+ */
+float dsp_frac_peak(const float *sp, uint32_t len, float *pk);
 
 #endif // DSP_H

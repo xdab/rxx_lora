@@ -11,11 +11,9 @@
 #include <complex.h>
 #include <stdint.h>
 
-/**
- * DETECT->SYNC look-ahead (this port): when the detector fires it scans this
- * many windows forward for the sync word's signature (see detect.c), so the
- * raw buffer must stay readable that far past the frame.
- */
+/** Buffer retention contract: the SFD slot pipeline (src/sfd.c) reads up to
+ *  this many windows either side of the fire (the source's slack; the stream
+ *  head/tail are virtual-zero padded). */
 #define SYNC_LOOKAHEAD 12
 
 /**

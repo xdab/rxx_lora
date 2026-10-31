@@ -18,9 +18,8 @@ struct ring;
 
 /**
  * Create an empty ring; `chunk` is the dead-prefix size (samples) that
- * triggers a compaction. `cap` pre-allocates the storage up front — steady
- * state then never reallocs; 0 defers the allocation to the first
- * ring_reserve. Returns NULL on allocation failure.
+ * triggers a compaction. `cap` pre-allocates the storage; 0 defers it to the
+ * first ring_reserve. Returns NULL on allocation failure.
  */
 struct ring *ring_create(size_t chunk, size_t cap);
 
@@ -39,9 +38,8 @@ int ring_reserve(struct ring *r, size_t n);
 void ring_write(struct ring *r, const float complex *in, size_t n);
 
 /**
- * Zero-copy append: the tail of the room ring_reserve(r, n) just made,
- * to be filled by the caller (a device read or a resampler's out buffer).
- * ring_commit(r, filled) then makes `filled` (<= n) samples live.
+ * Zero-copy append: the tail of the room ring_reserve(r, n) just made, to be
+ * filled by the caller. ring_commit(r, filled) makes `filled` (<= n) live.
  */
 float complex *ring_write_span(struct ring *r, size_t n);
 void ring_commit(struct ring *r, size_t n);

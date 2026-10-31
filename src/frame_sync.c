@@ -115,6 +115,11 @@ struct frame_sync *frame_sync_create(
         log_error("frame_sync_create: 2N dsp_fft_alloc failed\n");
         goto out;
     }
+    if (sfd_alloc(s) != 0)
+    {
+        log_error("frame_sync_create: sfd_alloc failed\n");
+        goto out;
+    }
     ret = 0;
 out:
     if (ret < 0)
@@ -158,6 +163,7 @@ static void frame_sync_cleanup(struct frame_sync *s)
     free(s->detect_mag_hist);
     free(s->detect_mag_avg);
     free(s->detect_mag_sum);
+    sfd_free(s);
     if (s->fft_cfg)
         dsp_fft_free(s->fft_cfg);
     if (s->est_fft_cfg)
