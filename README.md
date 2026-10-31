@@ -32,6 +32,8 @@ Naturally, the likes of `librtlsdr` are unavoidable if support for the actual de
   - Debian/Ubuntu: `librtlsdr0` `librtlsdr-dev`
   - Fedora: `rtl-sdr` `rtl-sdr-devel`
   - Arch: `rtl-sdr` (AUR)
+  - any distro, from source (what CI does on Arch, where librtlsdr isn't packaged):
+    `git clone https://gitea.osmocom.org/sdr/rtl-sdr && cmake -S rtl-sdr -B rtl-sdr/build -DCMAKE_INSTALL_PREFIX=/usr -DINSTALL_UDEV_RULES=OFF && cmake --build rtl-sdr/build --target install` (needs `cmake` `pkgconf` `libusb` headers)
 - [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers (for `rsp_lora`;
   Linux only, and its `sdrplay_apiService` daemon must be running):
   - all distros: the vendor's `.run` installer
