@@ -120,16 +120,42 @@ for any preamble length), not a learned detector. Whether it buys range
 or only false-alarm margin is decided by `tools/c_fa.py` and the per-stage
 attribution; the two trade off.
 
-### Joint net-id read: one foreign false-accept corner
+### Joint net-id read: foreign false-accepts
 
-The joint pair read (src/sync.c `decode_netid_pair`) converts 1/300
-foreign frames (0x2b symbols against a `-w 0x12` filter, −17 dB) that the
-plain argmax read rejects: a weak blade pair at spacing inside the
-verdict's mod-N/4 ±2 window passes, and the early-walk branch accepts it.
-The 6 dB per-member power gate did not stop this one (its blade was within
-6 dB). Fix shape: tighten the joint spacing window or the early-walk
-interaction, re-certify foreign rejection at 0.0 (the harness:
-`data/sweep.py --netid X --gen-netid Y` cross runs, both binaries).
+The joint pair read (src/sync.c `decode_netid_pair`) fabricates net-id passes
+on foreign frames. Classified by `data/netid_audit.py` (SF9 os2, netid 0x12,
+1000 trials/point, manifests in `data/na_*.jsonl`), two mechanisms, neither
+the one first suspected:
+
+- **Dominant — substituted netid2, shared first symbol.** A foreign id
+  sharing our w0 (0x1a vs 0x12: same hi nibble) reads its true symbols
+  fine (argmax [8, 80]); the joint read then swaps netid2 to a noise blade
+  at 16/144/272/400 — every member of our w1's mod-N/4 family, which is
+  exactly what its spacing window searches for — and the normal branch's
+  mod-N/4 compare waves it through. ~1-2% of frames per point across the
+  whole SNR range, still 0.7% at -13 dB, payloads CRC-valid (real foreign
+  messages delivered as ours).
+- **Minority — early-walk corner** (the original 1/300 at -17 dB against
+  0x2b): a manufactured pair lands at the (w0-8, w1-8) mirror; one observed
+  accept had dec0 = 0, the DC bin, so DC-bin reads deserve scrutiny in any
+  speculative accept.
+
+The 6 dB (0.25) per-member power gate stops neither. Fix shape, from the
+data: the substituted blade must be judged against the argmax it displaces
+(which is the true foreign tone, fully present in every observed accept) —
+a substitution may only override a low-prominence argmax member (a real
+tone is sharp above its local floor; a noise blade is not), ~20-40 lines
+in `decode_netid_pair` using magnitudes already computed. Expected payoff:
+foreign false-accepts 1-3% -> 0.0 (real foreign messages with valid CRC no
+longer delivered as ours); own-id decode unchanged — the guard's trigger
+(intact argmax) fires on fabrications, not on the noise-blade conversions
+the joint read exists for (~20% of own-id frames at -18 dB). Threshold
+calibration can run offline against the existing manifests (the spec
+debug lines carry per-spectrum top-2 tones+mags). Fallback if prominence
+won't separate the arms: the DC-bin/symbol-0 guard on the early-walk path.
+Effort: ~half a day incl. recertification (audit arms 0x2b/0x1a/0x32 +
+same-id control to 3000 trials/point, ~30-60 min unattended) and gates.
+Recertify foreign rejection to 0.0 at depth on both binaries.
 
 ## Working rate and sampling architecture
 
