@@ -64,9 +64,6 @@ void demod_reset(struct demod_state *s, float cfo)
         s->downchirp[n] *=
             cexpf(I * (-2.0f * (float)M_PI * cfo_rest / (float)s->number_of_bins * (float)n));
 
-    s->a_ema = 0.0f;
-    s->a_ema_valid = 0;
-
     log_trace(
         "demod LO: cfo=%+.4f bins -> rotate(%d) + twist(%+.4f)\n",
         (double)cfo,
@@ -185,20 +182,6 @@ int demod_step(struct demod_state *s, const float complex *in)
 
 #define DEMOD_SOFT_EPS 1e-12f
 
-/* EMA factor for the metric slope across the frame's symbols; default
- * 1.0 = off (DEMOD_A_EMA in (0,1) tames per-window SNR jitter). */
-static float demod_a_alpha(void)
-{
-    static float cached;
-    if (!cached)
-    {
-        const char *e = getenv("DEMOD_A_EMA");
-        float f = e ? (float)atof(e) : 1.0f;
-        cached = (f > 0.0f && f < 1.0f) ? f : 1.0f;
-    }
-    return cached;
-}
-
 /* Soft-output twin of the argmax above; see demod.h. Not in the reference.
  *
  * The bin magnitudes are sufficient statistics for the symbol value. The
@@ -225,14 +208,6 @@ void demod_soft_llrs(struct demod_state *s, float *llr)
     // a = lambda/(1+lambda) in floor units; 0 (no information) when the
     // spectrum is flat or silent
     a = (mmax > noise && noise > 0.0f) ? (mmax - noise) / (mmax * noise) : 0.0f;
-
-    if (demod_a_alpha() < 1.0f) // EMA across symbols tames per-window SNR jitter
-    {
-        if (s->a_ema_valid)
-            a = demod_a_alpha() * a + (1.0f - demod_a_alpha()) * s->a_ema;
-        s->a_ema = a;
-        s->a_ema_valid = 1;
-    }
 
     for (b = 0; b < s->number_of_bins; b++)
     {
