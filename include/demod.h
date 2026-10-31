@@ -29,6 +29,10 @@ struct demod_state
     dsp_cpx *cx_in;           // FFT input
     dsp_cpx *cx_out;          // FFT output
     float *fft_mag;           // magnitude-squared spectrum
+
+    // DEMOD_A_EMA knob: smoothed LLR metric slope, reset per frame
+    float a_ema;
+    int a_ema_valid;
 };
 
 /**
