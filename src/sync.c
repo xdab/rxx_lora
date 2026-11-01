@@ -393,13 +393,9 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
                     (long)n / 4);
                 if (d > (int32_t)n / 8)
                     d -= (int32_t)n / 4;
-                /* runner-ups sit within ~2 dB of the window argmax; blades do not.
-                 * A substituted member must carry >= 0.65 of the argmax it
-                 * displaces: the joint read's own-id conversions replace a
-                 * noise blade with a comparable or stronger tone (measured
-                 * ratio >= 0.70), while foreign-id fabrications swap the
-                 * true foreign tone for a spacing-consistent blade (measured
-                 * ratio <= 0.61) — a real tone is not given away cheaply. */
+                /* a substituted member must carry at least 0.65 of the
+                 * argmax it displaces — own-id conversions replace a noise
+                 * blade, foreign-id fabrications displace a real tone */
                 if (abs(d) <= 2 && mags0[i] > 0.25f * mags0[0] && mags1[j] > 0.25f * mags1[0] &&
                     (i == 0 || mags0[i] > 0.65f * mags0[0]) &&
                     (j == 0 || mags1[j] > 0.65f * mags1[0]) && mags0[i] + mags1[j] > best_p)

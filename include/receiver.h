@@ -11,12 +11,11 @@ struct source;
 struct receiver;
 
 /**
- * Chase-II payload retry tuning: on a CRC fail, the k least-reliable payload
- * codewords are retried on their runner-up candidates, singles then pairs;
- * every CRC-passing combo is accepted by lowest total flip LLR loss, within
- * the tau budget. Off unless enabled; the CLI's --chase/--chase-k/--chase-tau
- * set it. The suspicion gate (a suspect's margin must be under 0.2 of its
- * LLR mass) is baked in the receiver: measured flat-optimal, no knob.
+ * Chase retry tuning: on a CRC fail, the k least-reliable payload codewords
+ * are retried on their runner-up candidates, singles then pairs; every
+ * CRC-passing combo is accepted by lowest total flip LLR loss, within the
+ * tau budget. Off unless enabled; the CLI's --chase/--chase-k/--chase-tau
+ * set it.
  */
 struct chase_config
 {

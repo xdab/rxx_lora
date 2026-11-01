@@ -10,8 +10,8 @@
  *                 downchirp evidence (downchirp x upchirp = tone at f - tau)
  *   pairing       tau = wrap(u - d)/2, f = wrap(u - tau); N/2 ambiguity
  *                 resolved by |f| <= N/4
- *   two-pass      re-time by tau, re-lock, known-bin tests on the pure grid,
- *                 scored in noise-power units (lam) over slot shifts
+ *   two-pass      re-time by tau, re-lock, coherent known-bin scoring over
+ *                 slot shifts, in noise-power units (lam)
  *   gate          lam >= SFD_LAM_GATE in worded mode; accept-any skips the
  *                 gate (no expected sync word -> other scale)
  */
@@ -28,13 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// SFD start, windows past the fire: 6 for a prompt fire (plen + 3 - n_up_req),
-// less when averaging or resets delay the run; the +-2 fine shifts extend both
-// ends
+// SFD start, windows past the fire; the fine shifts extend both ends
 #define SFD_Q_MIN 2
 #define SFD_Q_MAX 8
-// fine-pass slot shifts around the re-timed candidate, in windows: the
-// change-point residual leaves k_hat up to 3 slots off
+// fine-pass slot shifts around the re-timed candidate, in windows
 #define SFD_SHIFT_MIN (-3)
 #define SFD_SHIFT_MAX 3
 
@@ -49,13 +46,11 @@
 #define SFD_COH_LEN (16u) // x N, set at alloc time
 
 // the fine D group's scan half-window around u_r, bins: on the re-timed grid
-// the downchirp tone sits at u_r - 2*eps (eps = residual grid phase), so the
-// known-bin test scans for it instead of assuming the bin
+// the downchirp tone sits slightly off u_r, so the test scans for it
 #define SFD_COH_D_W 6.0f
 
-// noise-only p_0.001 of the worded score; C-build H0 measured: noise fires score
-// lam <= 21 (SF9, 33 fires) / <= 37 (SF7, 212 fires) — the gate is a coarse
-// pre-filter, the net-id read arbitrates (foreign frames score lam ~469 median)
+// noise-only p_0.001 of the worded score; a coarse pre-filter — the net-id
+// read arbitrates
 #define SFD_LAM_GATE 32.5f
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // qsort comparator
@@ -291,9 +286,8 @@ float sfd_median_power(float *scratch, const float *mag, uint32_t len)
 
 /* Peak known-bin power of `count` coherently concatenated slots from `off`,
  * dechirped by `ref`, scanned over +-w bins (N-scale) around u_r when w > 0.
- * Concatenating before the FFT keeps the tone phase-continuous, so signal
- * power adds K^2 against K noise — the per-slot power sum's variance scales
- * with its mean squared, this does not. */
+ * Concatenating before the FFT keeps the tone phase-continuous, so the
+ * combined evidence stays low-variance. */
 static float sfd_coh_pow(
     struct frame_sync *s,
     const float complex *in,
@@ -452,10 +446,8 @@ static int sfd_coarse(
         float score = dpk * dpk;
         for (int j = -6; j <= -3; j++) // U over the four slots before the pair
             score += upow[q + j + 4];
-        // guard: the U-sum is flat for every q at-or-before the true SFD, so
-        // dpk noise alone would decide there and drift q to the early scan
-        // edge; the pair slots' own known-bin power at u is noise at the true
-        // q and two full preamble tones one slot early — subtract it
+        // guard: the pair slots' own known-bin power at u is noise at the
+        // true change point and two full preamble tones one slot early
         score -= upow[q + 4] + upow[q + 5];
         if (score > best_score)
         {
