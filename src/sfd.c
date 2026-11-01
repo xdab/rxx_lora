@@ -37,10 +37,10 @@
 #define SFD_SHIFT_MIN (-2)
 #define SFD_SHIFT_MAX 2
 
-// slot offsets covered: change-point U slots q-6..q+1 for q in [2, 8] ->
-// -4..5; fine-pass down slots (shift + m for m in [-6, -1]) -> -8..1, up
-// slots (shift + {0, 1}) -> -2..3
-#define SFD_U_SLOTS 10
+// slot offsets covered: change-point U slots q-6..q-3 for q in [2, 8] ->
+// -4..5, plus the guard's pair slots q, q+1 -> 2..9; fine-pass down slots
+// (shift + m for m in [-6, -1]) -> -8..1, up slots (shift + {0, 1}) -> -2..3
+#define SFD_U_SLOTS 14
 #define SFD_MAX_CANDIDATES (SFD_MAX_TAU_REPS * (SFD_SHIFT_MAX - SFD_SHIFT_MIN + 1))
 
 // noise-only p_0.001 of the worded score
@@ -350,8 +350,8 @@ static int sfd_coarse(
     /* Change point over candidate SFD starts q windows past the fire:
      * known-bin power at u, plus the candidate's two windows dechirped by
      * the upchirp (downchirp evidence). */
-    float upow[SFD_U_SLOTS]; // slot offsets -4..5, index o + 4
-    for (int o = -4; o <= 5; o++)
+    float upow[SFD_U_SLOTS]; // slot offsets -4..9, index o + 4
+    for (int o = -4; o <= 9; o++)
     {
         sfd_slot_mag(s, in, (int64_t)o * sps, s->downchirp, s->sfd.mag);
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
@@ -373,6 +373,11 @@ static int sfd_coarse(
         float score = dpk * dpk;
         for (int j = -6; j <= -3; j++) // U over the four slots before the pair
             score += upow[q + j + 4];
+        // guard: the U-sum is flat for every q at-or-before the true SFD, so
+        // dpk noise alone would decide there and drift q to the early scan
+        // edge; the pair slots' own known-bin power at u is noise at the true
+        // q and two full preamble tones one slot early — subtract it
+        score -= upow[q + 4] + upow[q + 5];
         if (score > best_score)
         {
             best_score = score;

@@ -8,29 +8,53 @@
 
 The DETECT fire runs the SFD-first slot pipeline (`sfd_locate`, `src/sfd.c`):
 coherent lock over the certified preamble run → change-point score with
-positive downchirp evidence → pairing `τ = wrap(û − d̂)/2`, `f = wrap(û − τ)`
+positive downchirp evidence and negative upchirp evidence at the pair →
+pairing `τ = wrap(û − d̂)/2`, `f = wrap(û − τ)`
 (N/2 ambiguity resolved by `|f| ≤ N/4`) → two-pass re-time → known-bin tests
 scored in noise-power units (Λ) → Λ gate (noise-calibrated p₀.₀₀₁ at 32.5,
 worded mode) arbitrates whether the fire was a frame at all. The walk starts
 on the reference's window lattice (fire + `os·(N − k_hat)` mod sps), with the
 pipeline deciding where on that lattice netid1 sits; `netid_verdict`'s
 early-walk/foreign/nibble logic is the verdict on the read. The Python
-prototype is `tools/sfd_hunt.py`.
+prototype is `data/sfd_hunt.py`; the coarse-pass audit is
+`data/sfd_coarse_audit.py`.
 
-Measured end-to-end (paired, common seeds, 1500 trials/point, `tools/ber.py`,
-SF9 os=2, 8 B payload: port vs prior chain): PER 1.4% vs 3.0% at −14 dB
-per-sample, 6.7% vs 11.0% at −15, 68.4% vs 72.9% at −17; the port decodes
-clean from −12 dB where the prior chain still errs at −11. Sync-loss bucket
-at −17 dB: 35.3% (300 trials, `tools/sync_decomp.py`).
-`tools/regression.py` 41/41; `tools/regression_perf.py` worst case 9× RT.
+Measured end-to-end (1500 trials/point, `tools/ber.py`, SF9 os=2, cr4/5,
+8 B payload): PER 0.2% at −14 dB per-sample, 3.1% at −15, 19.6% at −16,
+59.4% at −17 (manifests `data/ab_guard_new.jsonl`).
+`tools/regression.py` 41/41; `tools/regression_perf.py` worst case 15× RT.
 
 Remaining, in order:
 
-1. **Coarse-pass robustness.** The true hypothesis is missing from the fine
-   pass's candidate set in 6 / 17 / 56% of prototype trials at eff
-   −11 / −14 / −17 in-band — the coarse `d̂` (one argmax over the summed
-   two-slot up-ref spectrum) feeding the τ pairing is the limiter. Wider D
-   summation, or a coarse τ that does not rest on a single argmax.
+1. **Coarse-pass robustness — the change-point guard is in; the residual
+   limiter is fine-pass arbitration.** The coarse stage's limiter was the
+   change-point slot, not the `d̂` argmax an earlier entry suspected: the
+   U-sum is flat for every q at-or-before the true SFD, so dpk noise alone
+   decided there and drifted q to the early scan edge, and the fine pass's
+   candidate set then missed the true grid outright. The score now subtracts
+   the pair slots' own known-bin power at u — noise at the true q, two full
+   preamble tones one slot early (`src/sfd.c` `sfd_coarse`; prototype
+   `slot_sync` `cp_guard`, `data/sfd_hunt.py`). Paired 1500-trial A/B on the
+   C build, common seeds, SF9 os=2 cr4/5 8B (`tools/ber.py --verdicts`,
+   manifests `data/ab_guard_{old,new}.jsonl`): sync-bucket failures
+   −81/−50/−16/−4 at −17/−16/−15/−14 dB per-sample, decode-ok
+   +5.4/+3.4/+1.1/+0.3 pp, 1 loss in 6000 trials. Prototype win rate
+   (1000 trials/point, `data/sfd_coarse_audit.py`): 94.1→97.1 / 81.0→89.3 /
+   63.8→69.4% at eff −11/−14/−17 in-band.
+
+   Audit context to not re-derive (`data/sfd_coarse_audit.py`, 1000
+   trials/point): the previously recorded 6/17/56% candidate-miss rates
+   reproduce at eff −11/−14 (5.5/16.1%) but not at eff −17 — 22.8%
+   generation-miss, 38.6% wrong-winner under the pinned quarter-symbol
+   definition; that figure predated any committed harness and its definition
+   is unrecoverable. The coarse `d̂` argmax is a minority fault (1–5%,
+   biased to high |CFO|, median ~48–54 bins vs ~36 overall). Remaining at
+   eff −17, in order of size: fine-pass arbitration losses 14.5% (the true
+   grid is in the candidate set and outscored — a Λ-scoring problem, not
+   generation), change-point residual 8.1%, coarse `d̂` 5.8%. The
+   prototype's 2–3% nohyp is a stream-edge artifact of its segment bounds
+   abort; the C pads virtual zeros and does not share it.
+
 2. **Λ gate calibration on the C build.** The gate runs the prototype's
    threshold (32.5, noise-only p₀.₀₀₁); the C score distribution can differ
    (float vs double, the 4N slot FFT, the representative-wide noise floor).
@@ -123,8 +147,8 @@ attribution; the two trade off.
 ### Joint net-id read: foreign false-accepts
 
 The joint pair read (src/sync.c `decode_netid_pair`) fabricates net-id passes
-on foreign frames. Classified by `data/netid_audit.py` (SF9 os2, netid 0x12,
-1000 trials/point, manifests in `data/na_*.jsonl`), two mechanisms, neither
+on foreign frames. Classified by an uncommitted audit script (SF9 os2, netid
+0x12, 1000 trials/point, one-off manifests not kept), two mechanisms, neither
 the one first suspected:
 
 - **Dominant — substituted netid2, shared first symbol.** A foreign id
