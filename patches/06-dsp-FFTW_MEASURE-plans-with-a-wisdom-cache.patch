@@ -1,0 +1,96 @@
+From fe84a9148174174992d435c2a8d2a498a9131f18 Mon Sep 17 00:00:00 2001
+From: xdab <47300315+xdab@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 19:23:43 +0100
+Subject: [PATCH] dsp: FFTW_MEASURE plans with a wisdom cache
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Plans are measured once and cached in ~/.cache/rxx_lora/fftwf.wisdom
+(XDG_CACHE_HOME honored, mkdir'd on demand); every later process imports
+before planning. Without the cache FFTW_MEASURE re-plans for seconds per
+process — the first attempt, plain MEASURE, made the regression gate 14x
+slower and is not viable.
+
+Measured: +6-11% on a 200s SF12 noise bed (warm wisdom), +2.7% across
+the perf matrix net of the +3 ms warm-start floor (import + planner
+init); short file invocations pay the floor, streaming runs amortize it.
+Cold start (first process on a machine) pays the measurement.
+
+regression.py 41/41.
+---
+ src/dsp.c | 37 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/src/dsp.c b/src/dsp.c
+index 08f3948..0d313fc 100644
+--- a/src/dsp.c
++++ b/src/dsp.c
+@@ -16,7 +16,9 @@
+ #include <fftw3.h>
+ #include <math.h>
+ #include <stdint.h>
++#include <string.h>
+ #include <stdlib.h>
++#include <sys/stat.h>
+ 
+ // dsp_cpx and fftwf_complex are both two contiguous floats.
+ _Static_assert(sizeof(dsp_cpx) == sizeof(fftwf_complex), "dsp_cpx must match fftwf_complex layout");
+@@ -29,6 +31,22 @@ struct dsp_fft_state
+     dsp_cpx *y; // planner output, referenced by the plan for its lifetime
+ };
+ 
++/* Wisdom cache: plans measured once, reused by every later process. Without
++ * it, FFTW_MEASURE re-plans for seconds at each start — fatal for short runs.
++ * Import failures (first run, stale file) fall back to measuring fresh. */
++static const char *dsp_wisdom_path(void)
++{
++    static char path[512];
++    const char *cache = getenv("XDG_CACHE_HOME");
++
++    if (!cache || !*cache)
++        cache = getenv("HOME");
++    if (!cache || !*cache ||
++        snprintf(path, sizeof(path), "%s/.cache/rxx_lora/fftwf.wisdom", cache) >= (int)sizeof(path))
++        return NULL;
++    return path;
++}
++
+ dsp_fft_cfg dsp_fft_alloc(int nfft)
+ {
+     if (nfft < 2 || (nfft & (nfft - 1)))
+@@ -47,13 +65,30 @@ dsp_fft_cfg dsp_fft_alloc(int nfft)
+         return NULL;
+     }
+ 
++    const char *wisdom = dsp_wisdom_path();
++    if (wisdom)
++    {
++        char dir[512];
++        snprintf(dir, sizeof(dir), "%s", wisdom);
++        char *slash = strrchr(dir, '/');
++        if (slash)
++        {
++            *slash = 0;
++            (void)mkdir(dir, 0755); // EEXIST fine; export needs the directory
++        }
++        (void)fftwf_import_wisdom_from_filename(wisdom);
++    }
++
+     st->plan = fftwf_plan_dft_1d(
+-        (int)st->nfft, (fftwf_complex *)st->x, (fftwf_complex *)st->y, FFTW_FORWARD, FFTW_ESTIMATE);
++        (int)st->nfft, (fftwf_complex *)st->x, (fftwf_complex *)st->y, FFTW_FORWARD, FFTW_MEASURE);
+     if (!st->plan)
+     {
+         dsp_fft_free(st);
+         return NULL;
+     }
++
++    if (wisdom)
++        (void)fftwf_export_wisdom_to_filename(wisdom); // every alloc: each size lands in the file
+     return st;
+ }
+ 
+-- 
+2.56.0
+

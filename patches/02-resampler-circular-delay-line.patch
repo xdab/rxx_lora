@@ -1,0 +1,58 @@
+From 59ea8d87ea2cfc82732de33a1bbac9e8d23ee01e Mon Sep 17 00:00:00 2001
+From: xdab <47300315+xdab@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 19:02:47 +0100
+Subject: [PATCH] resampler: circular delay line
+
+push_sample() shifted the whole h_sub-float delay line per input sample;
+a ring index makes the push O(1) and branch_out walks the same oldest-
+to-newest order. Regression 41/41.
+---
+ src/resample.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/src/resample.c b/src/resample.c
+index 85c5d85..1883885 100644
+--- a/src/resample.c
++++ b/src/resample.c
+@@ -12,7 +12,8 @@ struct resampler
+     unsigned npfb;        // number of polyphase branches
+     unsigned h_sub;       // taps per branch = 2m
+     float *coef;          // npfb*h_sub branch taps, row i oldest-tap-first
+-    float complex *w;     // delay line, w[0] oldest .. w[h_sub-1] newest
++    float complex *w;     // circular delay line, h_sub slots
++    unsigned w_pos;       // delay-line write position; slot w_pos is the oldest
+     float rate;           // output/input sample rate
+     float del;            // timing step per output = 1/rate
+     float tau;            // accumulated timing phase
+@@ -36,19 +37,24 @@ enum
+ static float complex branch_out(const struct resampler *rs, int i)
+ {
+     const float *h = rs->coef + (size_t)i * rs->h_sub;
++    unsigned oldest = rs->w_pos;
+     float complex acc = 0;
+ 
+     for (unsigned k = 0; k < rs->h_sub; k++)
+-        acc += h[k] * rs->w[k];
++    {
++        acc += h[k] * rs->w[oldest];
++        if (++oldest == rs->h_sub)
++            oldest = 0;
++    }
+ 
+     return acc;
+ }
+ 
+ static void push_sample(struct resampler *rs, float complex x)
+ {
+-    for (unsigned k = 0; k + 1 < rs->h_sub; k++)
+-        rs->w[k] = rs->w[k + 1];
+-    rs->w[rs->h_sub - 1] = x;
++    rs->w[rs->w_pos] = x; // overwrite the oldest slot; it becomes the newest
++    if (++rs->w_pos == rs->h_sub)
++        rs->w_pos = 0;
+ }
+ 
+ // Advance the fractional timing phase by one output sample
+-- 
+2.56.0
+

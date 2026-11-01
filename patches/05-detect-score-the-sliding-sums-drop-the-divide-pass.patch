@@ -1,0 +1,97 @@
+From 15c3c12b868ca73f94f1e72908b547be5b8f0418 Mon Sep 17 00:00:00 2001
+From: xdab <47300315+xdab@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 19:13:20 +0100
+Subject: [PATCH] detect: score the sliding sums, drop the divide pass
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The 3-bin score compares bins against each other, so the per-window
+/fill of the averaged spectrum is a constant factor — score the running
+sums directly, divide only at the trace print, and drop the
+detect_mag_avg buffer (one full N-pass less per DETECT window).
+
+regression.py 41/41.
+---
+ src/detect.c              | 11 ++++++-----
+ src/frame_sync.c          |  4 +---
+ src/frame_sync_internal.h |  4 ++--
+ 3 files changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/src/detect.c b/src/detect.c
+index eecba20..b5dfc03 100644
+--- a/src/detect.c
++++ b/src/detect.c
+@@ -63,9 +63,10 @@ static int get_symbol_val_detect(
+             }
+         }
+ 
+-        for (uint32_t b = 0; b < n; b++)
+-            s->detect_mag_avg[b] = s->detect_mag_sum[b] / (float)fill;
+-        mag = s->detect_mag_avg;
++        /* The 3-bin score below compares bins against each other, so the
++         * /fill of the average is a constant factor: score the running sums
++         * directly and skip the divide pass; the trace divides at print. */
++        mag = s->detect_mag_sum;
+     }
+ 
+     int best = 0, second = -1;
+@@ -107,9 +108,9 @@ static int get_symbol_val_detect(
+             s->fft_mag[raw],
+             fill,
+             best,
+-            best_score,
++            best_score / (float)fill,
+             second,
+-            second_score,
++            second_score / (float)fill,
+             tb);
+     else
+         log_trace(
+diff --git a/src/frame_sync.c b/src/frame_sync.c
+index 163e2c3..cac66ca 100644
+--- a/src/frame_sync.c
++++ b/src/frame_sync.c
+@@ -86,7 +86,6 @@ struct frame_sync *frame_sync_create(
+     {
+         s->detect_mag_hist =
+             malloc((size_t)s->detect_avg * s->number_of_bins * sizeof(*s->detect_mag_hist));
+-        s->detect_mag_avg = malloc(s->number_of_bins * sizeof(*s->detect_mag_avg));
+         s->detect_mag_sum = calloc(s->number_of_bins, sizeof(*s->detect_mag_sum));
+     }
+     if (!s->preamb_up_vals || !s->mode_hash || !s->upchirp || !s->downchirp || !s->in_down ||
+@@ -95,7 +94,7 @@ struct frame_sync *frame_sync_create(
+         !s->cfo_correc || !s->cfo_correc_aug || !s->symb_corr || !s->est_dechirped ||
+         !s->est_cx_in || !s->est_cx_out || !s->est_fft_mag || !s->est_fft_val || !s->est_k0 ||
+         !s->est_k0_mag || !s->cx_in || !s->cx_out || !s->fft_mag ||
+-        (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_avg || !s->detect_mag_sum)))
++        (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_sum)))
+     {
+         log_error("frame_sync_create: out of memory\n");
+         goto out;
+@@ -161,7 +160,6 @@ static void frame_sync_cleanup(struct frame_sync *s)
+     free(s->cx_out);
+     free(s->fft_mag);
+     free(s->detect_mag_hist);
+-    free(s->detect_mag_avg);
+     free(s->detect_mag_sum);
+     sfd_free(s);
+     if (s->fft_cfg)
+diff --git a/src/frame_sync_internal.h b/src/frame_sync_internal.h
+index ca3f734..2ee0ab7 100644
+--- a/src/frame_sync_internal.h
++++ b/src/frame_sync_internal.h
+@@ -163,8 +163,8 @@ struct frame_sync
+     float *fft_mag;  // magnitude-squared spectrum
+     // DETECT averaging scratch (this port; unused when detect_avg <= 1)
+     float *detect_mag_hist;   // ring of the last detect_avg spectra
+-    float *detect_mag_avg;    // their running mean, the decision spectrum
+-    float *detect_mag_sum;    // sliding sum of the ring (resynced exactly)
++    float *detect_mag_sum;    // sliding sum of the ring (resynced exactly); the
++                              // decision spectrum up to the constant 1/fill
+     uint8_t detect_hist_fill; // windows currently in the ring
+     uint8_t detect_hist_pos;  // next ring slot
+     uint32_t detect_win_cnt;  // windows since the last exact sum resync
+-- 
+2.56.0
+
