@@ -50,6 +50,30 @@ static float complex branch_out(const struct resampler *rs, int i)
     return acc;
 }
 
+/* Branch pair (i, i+1) mixed at mu, then one FIR pass: the linear output
+ * interpolation of the arbitrary phase is algebraically the same MAC over
+ * the interpolated taps — half the complex work, exact (no mu quantize).
+ * Only valid for i + 1 < npfb (the INTERP path; the BOUNDARY pair spans
+ * executes and keeps the two-branch form). */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (branch, mix) distinct types at call sites
+static float complex branch_mix(const struct resampler *rs, int i, float mu)
+{
+    const float *h0 = rs->coef + (size_t)i * rs->h_sub;
+    const float *h1 = h0 + rs->h_sub;
+    unsigned oldest = rs->w_pos;
+    float complex acc = 0;
+
+    for (unsigned k = 0; k < rs->h_sub; k++)
+    {
+        float h = h0[k] + mu * (h1[k] - h0[k]);
+        acc += h * rs->w[oldest];
+        if (++oldest == rs->h_sub)
+            oldest = 0;
+    }
+
+    return acc;
+}
+
 static void push_sample(struct resampler *rs, float complex x)
 {
     rs->w[rs->w_pos] = x; // overwrite the oldest slot; it becomes the newest
@@ -84,18 +108,16 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
         }
         else
         {
-            rs->y0 = branch_out(rs, rs->b);
-
             if (rs->b == (int)rs->npfb - 1)
             {
                 // last branch: the next sample must arrive to interpolate
+                rs->y0 = branch_out(rs, rs->b);
                 rs->state = RESAMP_BOUNDARY;
                 rs->b = (int)rs->npfb;
             }
             else
             {
-                rs->y1 = branch_out(rs, rs->b + 1);
-                y[n++] = (1.0f - rs->mu) * rs->y0 + rs->mu * rs->y1;
+                y[n++] = branch_mix(rs, rs->b, rs->mu);
                 update_timing(rs);
             }
         }
