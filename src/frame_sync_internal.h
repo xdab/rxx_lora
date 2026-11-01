@@ -61,14 +61,14 @@ struct sfd
     dsp_cpx *cx_in;          // FFT input scratch shared by both plans
     dsp_cpx *cx_out;         // FFT output scratch shared by both plans
     float complex *slot;     // one decimated slot (N)
-    float *lockmag;          // lock magnitude spectrum (lock_len)
-    float *mag;              // one slot magnitude spectrum (4N)
-    float *dmag0;            // change-point D spectra (4N each)
+    float *lockmag;          // lock power spectrum (lock_len)
+    float *mag;              // one slot power spectrum (4N)
+    float *dmag0;            // change-point D power spectra (4N each)
     float *dmag1;
-    float *dsum;       // sqrt-power-sum scratch over the D pair (4N)
+    float *dsum;       // power sum over the D pair (4N)
     float *med;        // median scratch (4N)
-    float *fine_dn;    // fine-pass down-ref spectra (SFD_FINE_DN x 4N)
-    float *fine_up;    // fine-pass sigma2 slot spectrum (SFD_FINE_UP x 4N)
+    float *fine_dn;    // fine-pass down-ref power spectra (SFD_FINE_DN x 4N)
+    float *fine_up;    // fine-pass sigma2 slot power spectrum (SFD_FINE_UP x 4N)
     void *coh_fft_cfg; // coherent-group FFT plan, 16N points
     dsp_cpx *coh_in;   // coherent-group input scratch (4N)
     dsp_cpx *coh_out;  // coherent-group output scratch (16N)

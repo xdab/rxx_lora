@@ -60,8 +60,8 @@ static int sfd_cmp_float(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
-/* (max magnitude)^2 over the 3 bins around a fractional bin on the 4N-gridded
- * spectrum, clamped at the array ends. */
+/* Max power over the 3 bins around a fractional bin on the 4N-gridded
+ * power spectrum, clamped at the array ends. */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (spectrum, bins, bin)
 static float sfd_bin_pow(const float *mag, uint32_t n, float b_frac)
 {
@@ -76,7 +76,7 @@ static float sfd_bin_pow(const float *mag, uint32_t n, float b_frac)
     for (long i = lo; i < hi; i++)
         if (mag[i] > mx)
             mx = mag[i];
-    return mx * mx;
+    return mx;
 }
 
 /* Raw sample at p relative to the fire window; zero outside the source's
@@ -115,7 +115,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
     }
 }
 
-/* Magnitude spectrum (4N bins, zero-padded) of the slot at `off`, dechirped
+/* Power spectrum (4N bins, zero-padded) of the slot at `off`, dechirped
  * by ref (downchirp for upchirp slots, upchirp for the SFD's downchirps). */
 static void sfd_slot_mag(
     struct frame_sync *s,
@@ -136,7 +136,7 @@ static void sfd_slot_mag(
     memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < n4; i++)
-        mag[i] = hypotf(s->sfd.cx_out[i].r, s->sfd.cx_out[i].i);
+        mag[i] = s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
 }
 
 /* Coherent lock over `count` consecutive slots from `off`: dechirp each,
@@ -167,7 +167,8 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
     memset(s->sfd.cx_in + m, 0, (size_t)(s->sfd.lock_len - m) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.lock_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < s->sfd.lock_len; i++)
-        s->sfd.lockmag[i] = hypotf(s->sfd.cx_out[i].r, s->sfd.cx_out[i].i);
+        s->sfd.lockmag[i] =
+            s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
 
     // tone at u bins -> FFT bin u * L / N; wrap handles the negative half
     return util_wrap(
@@ -275,11 +276,11 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
     return ntau;
 }
 
-/* Median power of a magnitude spectrum; scratch (len floats) is reordered. */
+/* Median power of a power spectrum; scratch (len floats) is reordered. */
 float sfd_median_power(float *scratch, const float *mag, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
-        scratch[i] = mag[i] * mag[i];
+        scratch[i] = mag[i];
     qsort(scratch, len, sizeof(float), sfd_cmp_float);
     return 0.5f * (scratch[len / 2 - 1] + scratch[len / 2]);
 }
@@ -438,12 +439,11 @@ static int sfd_coarse(
         sfd_slot_mag(s, in, (int64_t)q * sps, s->upchirp, s->sfd.dmag0);
         sfd_slot_mag(s, in, (int64_t)(q + 1) * sps, s->upchirp, s->sfd.dmag1);
         for (uint32_t i = 0; i < n4; i++)
-            s->sfd.dsum[i] =
-                sqrtf(s->sfd.dmag0[i] * s->sfd.dmag0[i] + s->sfd.dmag1[i] * s->sfd.dmag1[i]);
+            s->sfd.dsum[i] = s->sfd.dmag0[i] + s->sfd.dmag1[i];
 
         float dpk;
         float kd = dsp_frac_peak(s->sfd.dsum, n4, &dpk);
-        float score = dpk * dpk;
+        float score = dpk;
         for (int j = -6; j <= -3; j++) // U over the four slots before the pair
             score += upow[q + j + 4];
         // guard: the pair slots' own known-bin power at u is noise at the
