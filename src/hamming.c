@@ -35,18 +35,45 @@ static uint8_t hamming_encode_nibble(uint8_t nib, uint8_t cr)
                      (4 - cr));
 }
 
+/* Decode-side LUT: per coding rate and candidate, the codeword bits as ±1
+ * weights (MSB-first, 1 = bit set). Built once from the encoder, the score is
+ * then a plain dot product — no per-call re-encoding, no per-bit branch. */
+static int8_t hamming_signs[5][16][8];
+
+static void hamming_signs_init(void)
+{
+    for (uint8_t cr = 1; cr <= 4; cr++)
+    {
+        uint8_t cw_len = (uint8_t)(cr + 4);
+        for (uint8_t nib = 0; nib < 16; nib++)
+        {
+            uint8_t cw = hamming_encode_nibble(nib, cr);
+            for (uint8_t k = 0; k < cw_len; k++)
+                hamming_signs[cr][nib][k] = CODEWORD_BIT(cw, k, cw_len) ? 1 : -1;
+        }
+    }
+}
+
 uint8_t hamming_decode_soft(const float *llr, uint8_t cr, uint8_t *alt, float *margin)
 {
+    static int initialized = 0;
+    if (!initialized)
+    {
+        hamming_signs_init();
+        initialized = 1;
+    }
+
     uint8_t cw_len = (uint8_t)(cr + 4);
     uint8_t best_nib = 0, alt_nib = 0;
     float best_score = -1e30f, alt_score = -1e30f; // |score| <= 2*sum|llr|, far below
 
+    const int8_t (*rows)[8] = hamming_signs[cr];
     for (uint8_t nib = 0; nib < 16; nib++)
     {
-        uint8_t cw = hamming_encode_nibble(nib, cr);
+        const int8_t *sg = rows[nib];
         float score = 0.0f;
         for (uint8_t k = 0; k < cw_len; k++)
-            score += CODEWORD_BIT(cw, k, cw_len) ? llr[k] : -llr[k];
+            score += (float)sg[k] * llr[k];
         if (score > best_score)
         {
             alt_score = best_score;
