@@ -19,8 +19,11 @@ struct demod_state
     uint32_t samples_per_symbol; // N (the block runs post-decimation)
 
     // result fields, valid after demod_step()
-    int bin_idx;    // raw FFT argmax of the last window
-    int symbol_val; // LoRa symbol value mod(bin_idx - 1, N)
+    int bin_idx;       // raw FFT argmax of the last window
+    int symbol_val;    // LoRa symbol value mod(bin_idx - 1, N)
+    float peak_mag;    // fft_mag[bin_idx]: one fused pass computes these with
+    float noise_floor; // the blanked noise-floor mean; demod_snr/soft_llrs
+    int second_idx;    // runner-up bin: read the cache, never rescan the spectrum
 
     // internal
     float complex *upchirp;   // CFO-int-adapted reference upchirp
