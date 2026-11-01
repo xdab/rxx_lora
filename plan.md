@@ -8,12 +8,14 @@ the raw patches and the raw profiler outputs travel in the repo / `data/`.
 
 ## Inputs
 
-- `patches/01..07-*.patch` — raw `git format-patch` export of
-  `aa5d575..prof/mem-cpu`, renamed to the original commit order. They will NOT
-  `git am` cleanly: main's #4 (receiver depth) rewrote `src/sfd.c`,
-  `src/sync.c`, `src/receiver.c` and touched `src/demod.c`, `src/hamming.c`,
-  `src/frame_sync_internal.h`. Port by hand — literally where context matches,
-  in spirit where it doesn't.
+- The retired round's raw patches (a `git format-patch` export of
+  `aa5d575..prof/mem-cpu`, renamed to the original commit order) drove the
+  porting; they are NOT `git am`-able — main's #4 (receiver depth) rewrote
+  `src/sfd.c`, `src/sync.c`, `src/receiver.c` and touched `src/demod.c`,
+  `src/hamming.c`, `src/frame_sync_internal.h` — so they were ported by hand,
+  literally where context matched, in spirit where it didn't. The patch files
+  lived under `patches/` during the port and were dropped once all seven had
+  landed.
 - `tools/hotspots.py` — callgrind.out hot-spot attribution (function self-cost,
   hot lines, call sites, `--callers`); copied from the old Forgejo repo's
   `tools/prof/`, self-contained, `--selftest` included.
@@ -83,7 +85,8 @@ the profiler is attribution, not the verdict.
 ## Status
 
 - [x] branch `performance` off `main` (2340a49)
-- [x] raw patches imported under `patches/`
+- [x] raw patches imported under `patches/` (dropped again once the port
+      completed — the commits are the record)
 - [x] `tools/hotspots.py` copied, selftest + ruff clean
 - [x] baseline callgrind profile (1,353.8M Ir; machine-local numbers in `data/PROF.md`)
 - [x] patches 1–7 ported, profiled, gated (one commit each, f7df25e..85631eb)
