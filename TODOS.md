@@ -10,61 +10,36 @@ The DETECT fire runs the SFD-first slot pipeline (`sfd_locate`, `src/sfd.c`):
 coherent lock over the certified preamble run → change-point score with
 positive downchirp evidence and negative upchirp evidence at the pair →
 pairing `τ = wrap(û − d̂)/2`, `f = wrap(û − τ)`
-(N/2 ambiguity resolved by `|f| ≤ N/4`) → two-pass re-time → known-bin tests
-scored in noise-power units (Λ) → Λ gate (noise-calibrated p₀.₀₀₁ at 32.5,
-worded mode) arbitrates whether the fire was a frame at all. The walk starts
-on the reference's window lattice (fire + `os·(N − k_hat)` mod sps), with the
-pipeline deciding where on that lattice netid1 sits; `netid_verdict`'s
-early-walk/foreign/nibble logic is the verdict on the read. The Python
-prototype is `data/sfd_hunt.py`; the coarse-pass audit is
-`data/sfd_coarse_audit.py`.
+(N/2 ambiguity resolved by `|f| ≤ N/4`) → two-pass re-time → coherent
+known-bin scoring over slot shifts (the preamble and SFD groups concatenated
+before the FFT — signal power adds K² against K noise — scanned ±3 slots,
+each group's tone located by a small bin scan) → Λ gate (noise-calibrated
+p₀.₀₀₁ at 32.5, worded mode) arbitrates whether the fire was a frame at all.
+The walk starts on the reference's window lattice (fire + `os·(N − k_hat)`
+mod sps), with the pipeline deciding where on that lattice netid1 sits;
+`netid_verdict`'s early-walk/foreign/nibble logic is the verdict on the read.
+The Python prototype is `data/sfd_hunt.py`; the coarse-pass audit is
+`data/sfd_coarse_audit.py`; the fine-pass scoring A/B (the harness that
+falsifies against `slot_sync` and pairs every trial) is
+`data/sfd_fine_ab.py`.
 
 Measured end-to-end (1500 trials/point, `tools/ber.py`, SF9 os=2, cr4/5,
-8 B payload): PER 0.2% at −14 dB per-sample, 3.1% at −15, 19.6% at −16,
-59.4% at −17 (manifests `data/ab_guard_new.jsonl`).
-`tools/regression.py` 41/41; `tools/regression_perf.py` worst case 15× RT.
+8 B payload): PER 0.2% at −14 dB per-sample, ~1% at −15, ~5.5% at −16,
+~15% at −17. `tools/regression.py` 41/41; `tools/regression_perf.py` worst
+case 10× RT.
 
-Remaining, in order:
-
-1. **Coarse-pass robustness — the change-point guard is in; the residual
-   limiter is fine-pass arbitration.** The coarse stage's limiter was the
-   change-point slot, not the `d̂` argmax an earlier entry suspected: the
-   U-sum is flat for every q at-or-before the true SFD, so dpk noise alone
-   decided there and drifted q to the early scan edge, and the fine pass's
-   candidate set then missed the true grid outright. The score now subtracts
-   the pair slots' own known-bin power at u — noise at the true q, two full
-   preamble tones one slot early (`src/sfd.c` `sfd_coarse`; prototype
-   `slot_sync` `cp_guard`, `data/sfd_hunt.py`). Paired 1500-trial A/B on the
-   C build, common seeds, SF9 os=2 cr4/5 8B (`tools/ber.py --verdicts`,
-   manifests `data/ab_guard_{old,new}.jsonl`): sync-bucket failures
-   −81/−50/−16/−4 at −17/−16/−15/−14 dB per-sample, decode-ok
-   +5.4/+3.4/+1.1/+0.3 pp, 1 loss in 6000 trials. Prototype win rate
-   (1000 trials/point, `data/sfd_coarse_audit.py`): 94.1→97.1 / 81.0→89.3 /
-   63.8→69.4% at eff −11/−14/−17 in-band.
-
-   Audit context to not re-derive (`data/sfd_coarse_audit.py`, 1000
-   trials/point): the previously recorded 6/17/56% candidate-miss rates
-   reproduce at eff −11/−14 (5.5/16.1%) but not at eff −17 — 22.8%
-   generation-miss, 38.6% wrong-winner under the pinned quarter-symbol
-   definition; that figure predated any committed harness and its definition
-   is unrecoverable. The coarse `d̂` argmax is a minority fault (1–5%,
-   biased to high |CFO|, median ~48–54 bins vs ~36 overall). Remaining at
-   eff −17, in order of size: fine-pass arbitration losses 14.5% (the true
-   grid is in the candidate set and outscored — a Λ-scoring problem, not
-   generation), change-point residual 8.1%, coarse `d̂` 5.8%. The
-   prototype's 2–3% nohyp is a stream-edge artifact of its segment bounds
-   abort; the C pads virtual zeros and does not share it.
-
-2. **Λ gate calibration on the C build.** The gate runs the prototype's
-   threshold (32.5, noise-only p₀.₀₀₁); the C score distribution can differ
-   (float vs double, the 4N slot FFT, the representative-wide noise floor).
-   Recalibrate noise-only Λ/margin thresholds for this build, then measure
-   Pd/Pfa vs SNR and the foreign-frame flagging statistic before trusting
-   the gate at depth (accept-any mode skips the gate by design — no
-   expected words, other scale).
-3. **DETECT interface.** Feed the measured DETECT fire-time distribution
-   (incl. its early-fire / reset-delayed cases) into the lock-window
-   assumption (`SFD_Q_MIN`/`SFD_Q_MAX` in `src/sfd.c` are the current guess).
+Context to not re-derive: the fine pass scores coherent slot groups
+(`sfd_coh_pow`) because per-slot exponential terms have variance scaling
+with mean² — widening the candidate set then trades coverage for
+arbitration 1:1; full-range D-peak re-pairing was prototyped and measured a
+dead end (blade reps poison arbitration). The residual sync bucket at depth
+is downstream of an essentially exact sfd edge (net-id read ~57%, header
+~28%, sfd edge wrong ~11%) — see the net-id and header entries; the
+audit's old arbitration figure was an artifact of its synthetic lock-jitter
+model. Λ-gate H0 on C: noise fires Λ ≤ 21 (SF9) / ≤ 37 (SF7), foreign
+frames ~469 median — the gate pre-filters, the net-id read arbitrates.
+Measured fire→SFD distance stays inside [2, 7] windows past the fire
+(`SFD_Q_MIN`/`SFD_Q_MAX` = [2, 8] holds).
 
 ### Chase retry: CRC-codeword flips
 
