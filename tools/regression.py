@@ -29,7 +29,7 @@ S_MULTI = "Combined frame captures (data/capture*)"
 
 NOISE_AVG = 1  # the detector needs shallow averaging in AWGN (see noise_case)
 # dB, full-band per complex sample; every draw at every point must decode
-NOISE_SNR = {7: [-8.0, -4.0, 0.0], 9: [-12.0, -6.0, 0.0], 12: [-20.0, -10.0, 0.0]}
+NOISE_SNR = {7: [-9.0, -4.5, 0.0], 9: [-14.0, -7.0, 0.0], 12: [-21.0, -10.5, 0.0]}
 NOISE_DRAWS = 16  # AWGN realizations per SNR point
 
 CAPTURE_CONJ = {"capture1": True, "capture2": True, "capture3": False}  # mirrored spectrum
