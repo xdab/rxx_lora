@@ -63,9 +63,10 @@ static int get_symbol_val_detect(
             }
         }
 
-        for (uint32_t b = 0; b < n; b++)
-            s->detect_mag_avg[b] = s->detect_mag_sum[b] / (float)fill;
-        mag = s->detect_mag_avg;
+        /* The 3-bin score below compares bins against each other, so the
+         * /fill of the average is a constant factor: score the running sums
+         * directly and skip the divide pass; the trace divides at print. */
+        mag = s->detect_mag_sum;
     }
 
     int best = 0, second = -1;
@@ -107,9 +108,9 @@ static int get_symbol_val_detect(
             s->fft_mag[raw],
             fill,
             best,
-            best_score,
+            best_score / (float)fill,
             second,
-            second_score,
+            second_score / (float)fill,
             tb);
     else
         log_trace(

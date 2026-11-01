@@ -167,8 +167,8 @@ struct frame_sync
     float *fft_mag;  // magnitude-squared spectrum
     // DETECT averaging scratch (this port; unused when detect_avg <= 1)
     float *detect_mag_hist;   // ring of the last detect_avg spectra
-    float *detect_mag_avg;    // their running mean, the decision spectrum
-    float *detect_mag_sum;    // sliding sum of the ring (resynced exactly)
+    float *detect_mag_sum;    // sliding sum of the ring (resynced exactly); the
+                              // decision spectrum up to the constant 1/fill
     uint8_t detect_hist_fill; // windows currently in the ring
     uint8_t detect_hist_pos;  // next ring slot
     uint32_t detect_win_cnt;  // windows since the last exact sum resync

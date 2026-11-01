@@ -86,7 +86,6 @@ struct frame_sync *frame_sync_create(
     {
         s->detect_mag_hist =
             malloc((size_t)s->detect_avg * s->number_of_bins * sizeof(*s->detect_mag_hist));
-        s->detect_mag_avg = malloc(s->number_of_bins * sizeof(*s->detect_mag_avg));
         s->detect_mag_sum = calloc(s->number_of_bins, sizeof(*s->detect_mag_sum));
     }
     if (!s->preamb_up_vals || !s->mode_hash || !s->upchirp || !s->downchirp || !s->in_down ||
@@ -95,7 +94,7 @@ struct frame_sync *frame_sync_create(
         !s->cfo_correc || !s->cfo_correc_aug || !s->symb_corr || !s->est_dechirped ||
         !s->est_cx_in || !s->est_cx_out || !s->est_fft_mag || !s->est_fft_val || !s->est_k0 ||
         !s->est_k0_mag || !s->cx_in || !s->cx_out || !s->fft_mag ||
-        (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_avg || !s->detect_mag_sum)))
+        (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_sum)))
     {
         log_error("frame_sync_create: out of memory\n");
         goto out;
@@ -161,7 +160,6 @@ static void frame_sync_cleanup(struct frame_sync *s)
     free(s->cx_out);
     free(s->fft_mag);
     free(s->detect_mag_hist);
-    free(s->detect_mag_avg);
     free(s->detect_mag_sum);
     sfd_free(s);
     if (s->fft_cfg)
