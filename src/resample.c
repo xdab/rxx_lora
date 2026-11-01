@@ -12,7 +12,8 @@ struct resampler
     unsigned npfb;        // number of polyphase branches
     unsigned h_sub;       // taps per branch = 2m
     float *coef;          // npfb*h_sub branch taps, row i oldest-tap-first
-    float complex *w;     // delay line, w[0] oldest .. w[h_sub-1] newest
+    float complex *w;     // circular delay line, h_sub slots
+    unsigned w_pos;       // delay-line write position; slot w_pos is the oldest
     float rate;           // output/input sample rate
     float del;            // timing step per output = 1/rate
     float tau;            // accumulated timing phase
@@ -36,19 +37,24 @@ enum
 static float complex branch_out(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * rs->h_sub;
+    unsigned oldest = rs->w_pos;
     float complex acc = 0;
 
     for (unsigned k = 0; k < rs->h_sub; k++)
-        acc += h[k] * rs->w[k];
+    {
+        acc += h[k] * rs->w[oldest];
+        if (++oldest == rs->h_sub)
+            oldest = 0;
+    }
 
     return acc;
 }
 
 static void push_sample(struct resampler *rs, float complex x)
 {
-    for (unsigned k = 0; k + 1 < rs->h_sub; k++)
-        rs->w[k] = rs->w[k + 1];
-    rs->w[rs->h_sub - 1] = x;
+    rs->w[rs->w_pos] = x; // overwrite the oldest slot; it becomes the newest
+    if (++rs->w_pos == rs->h_sub)
+        rs->w_pos = 0;
 }
 
 // Advance the fractional timing phase by one output sample
