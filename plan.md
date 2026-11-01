@@ -85,6 +85,8 @@ the profiler is attribution, not the verdict.
 - [x] branch `performance` off `main` (2340a49)
 - [x] raw patches imported under `patches/`
 - [x] `tools/hotspots.py` copied, selftest + ruff clean
-- [ ] baseline callgrind profile
-- [ ] patches 1–7 ported, profiled, gated (one commit each)
-- [ ] wrap-up: `data/PROF.md` summary, final confirmation on capture3
+- [x] baseline callgrind profile (1,353.8M Ir; machine-local numbers in `data/PROF.md`)
+- [x] patches 1–7 ported, profiled, gated (one commit each, f7df25e..85631eb)
+- [x] wrap-up: `data/PROF.md` summary, final confirmation on capture3 (49/49 CRC valid
+      at every gate run). End-to-end paired wall clock: branch ~22-25% faster on
+      capture1; perf matrix 26-27/27 cases faster, 0 slower.
