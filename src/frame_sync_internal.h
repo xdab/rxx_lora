@@ -39,6 +39,13 @@ enum frame_sync_subphase
 #define SFD_FINE_DN 12
 #define SFD_FINE_UP 1
 
+/** Fine-pass decimated slots, offsets -9..2 windows (shared by both refs;
+ *  row = slot + 9). */
+#define SFD_FINE_DEC 12
+
+/** Coarse change-point pair-slot spectra, slots SFD_Q_MIN..SFD_Q_MAX+1 (4N each). */
+#define SFD_DPAIR 8
+
 /** Pairing representatives: (tau, f) and (tau +- N/2, f +- N/2) at most. */
 #define SFD_MAX_TAU_REPS 3
 
@@ -63,15 +70,15 @@ struct sfd
     float complex *slot;     // one decimated slot (N)
     float *lockmag;          // lock power spectrum (lock_len)
     float *mag;              // one slot power spectrum (4N)
-    float *dmag0;            // change-point D power spectra (4N each)
-    float *dmag1;
-    float *dsum;       // power sum over the D pair (4N)
-    float *med;        // median scratch (4N)
-    float *fine_dn;    // fine-pass down-ref power spectra (SFD_FINE_DN x 4N)
-    float *fine_up;    // fine-pass sigma2 slot power spectrum (SFD_FINE_UP x 4N)
-    void *coh_fft_cfg; // coherent-group FFT plan, 16N points
-    dsp_cpx *coh_in;   // coherent-group input scratch (4N)
-    dsp_cpx *coh_out;  // coherent-group output scratch (16N)
+    float *dpair;            // change-point pair-slot power spectra (SFD_DPAIR x 4N)
+    float *dsum;             // power sum over the D pair (4N)
+    float *med;              // median scratch (4N)
+    float complex *fine_dec; // fine-pass decimated slots (SFD_FINE_DEC x N)
+    float *fine_dn;          // fine-pass down-ref power spectra (SFD_FINE_DN x 4N)
+    float *fine_up;          // fine-pass sigma2 slot power spectrum (SFD_FINE_UP x 4N)
+    void *coh_fft_cfg;       // coherent-group FFT plan, 16N points
+    dsp_cpx *coh_in;         // coherent-group input scratch (4N)
+    dsp_cpx *coh_out;        // coherent-group output scratch (16N)
 };
 
 /** SFD-first coarse-sync outcome (src/sfd.c): the frame-grid decision at the
@@ -242,7 +249,7 @@ void sfd_free(struct frame_sync *s);
  *        in @p taus. @return the representative count */
 int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS]);
 
-/** @brief Median power of a magnitude spectrum; @p scratch (len floats) is
+/** @brief Median power of a power spectrum; @p scratch (len floats) is
  *        reordered in place. */
 float sfd_median_power(float *scratch, const float *mag, uint32_t len);
 
