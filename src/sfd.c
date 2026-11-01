@@ -60,8 +60,8 @@ static int sfd_cmp_float(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
-/* (max magnitude)^2 over the 3 bins around a fractional bin on the 4N-gridded
- * spectrum, clamped at the array ends. */
+/* Max power over the 3 bins around a fractional bin on the 4N-gridded
+ * power spectrum, clamped at the array ends. */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (spectrum, bins, bin)
 static float sfd_bin_pow(const float *mag, uint32_t n, float b_frac)
 {
@@ -76,7 +76,7 @@ static float sfd_bin_pow(const float *mag, uint32_t n, float b_frac)
     for (long i = lo; i < hi; i++)
         if (mag[i] > mx)
             mx = mag[i];
-    return mx * mx;
+    return mx;
 }
 
 /* Raw sample at p relative to the fire window; zero outside the source's
@@ -115,8 +115,27 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
     }
 }
 
-/* Magnitude spectrum (4N bins, zero-padded) of the slot at `off`, dechirped
- * by ref (downchirp for upchirp slots, upchirp for the SFD's downchirps). */
+/* Power spectrum (4N bins, zero-padded) of an already-decimated slot,
+ * dechirped by ref (downchirp for upchirp slots, upchirp for the SFD's
+ * downchirps). */
+static void sfd_slot_ref_fft(
+    struct frame_sync *s, const float complex *dec, const float complex *ref, float *mag)
+{
+    const uint32_t n = s->number_of_bins, n4 = 4u * n;
+
+    for (uint32_t j = 0; j < n; j++)
+    {
+        float complex v = dec[j] * ref[j];
+        s->sfd.cx_in[j].r = crealf(v);
+        s->sfd.cx_in[j].i = cimagf(v);
+    }
+    memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
+    dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
+    for (uint32_t i = 0; i < n4; i++)
+        mag[i] = s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
+}
+
+/* Power spectrum of the slot at `off`: decimate, then sfd_slot_ref_fft(). */
 static void sfd_slot_mag(
     struct frame_sync *s,
     const float complex *in,
@@ -124,19 +143,8 @@ static void sfd_slot_mag(
     const float complex *ref,
     float *mag)
 {
-    const uint32_t n = s->number_of_bins, n4 = 4u * n;
-
     sfd_slot_dec(s, in, off, s->sfd.slot);
-    for (uint32_t j = 0; j < n; j++)
-    {
-        float complex v = s->sfd.slot[j] * ref[j];
-        s->sfd.cx_in[j].r = crealf(v);
-        s->sfd.cx_in[j].i = cimagf(v);
-    }
-    memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
-    dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
-    for (uint32_t i = 0; i < n4; i++)
-        mag[i] = hypotf(s->sfd.cx_out[i].r, s->sfd.cx_out[i].i);
+    sfd_slot_ref_fft(s, s->sfd.slot, ref, mag);
 }
 
 /* Coherent lock over `count` consecutive slots from `off`: dechirp each,
@@ -167,7 +175,8 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
     memset(s->sfd.cx_in + m, 0, (size_t)(s->sfd.lock_len - m) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.lock_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < s->sfd.lock_len; i++)
-        s->sfd.lockmag[i] = hypotf(s->sfd.cx_out[i].r, s->sfd.cx_out[i].i);
+        s->sfd.lockmag[i] =
+            s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
 
     // tone at u bins -> FFT bin u * L / N; wrap handles the negative half
     return util_wrap(
@@ -189,10 +198,10 @@ int sfd_alloc(struct frame_sync *s)
     f->slot = malloc(n * sizeof(*f->slot));
     f->lockmag = malloc(f->lock_len * sizeof(*f->lockmag));
     f->mag = malloc(4 * (size_t)n * sizeof(*f->mag));
-    f->dmag0 = malloc(4 * (size_t)n * sizeof(*f->dmag0));
-    f->dmag1 = malloc(4 * (size_t)n * sizeof(*f->dmag1));
+    f->dpair = malloc((size_t)SFD_DPAIR * 4 * n * sizeof(*f->dpair));
     f->dsum = malloc(4 * (size_t)n * sizeof(*f->dsum));
     f->med = malloc(4 * (size_t)n * sizeof(*f->med));
+    f->fine_dec = malloc((size_t)SFD_FINE_DEC * n * sizeof(*f->fine_dec));
     f->fine_dn = malloc((size_t)SFD_FINE_DN * 4 * n * sizeof(*f->fine_dn));
     f->fine_up = malloc((size_t)SFD_FINE_UP * 4 * n * sizeof(*f->fine_up));
     f->cx_in = malloc(f->lock_len * sizeof(*f->cx_in));
@@ -202,7 +211,7 @@ int sfd_alloc(struct frame_sync *s)
     f->slot_fft_cfg = dsp_fft_alloc(4 * (int)n);
     f->lock_fft_cfg = dsp_fft_alloc((int)f->lock_len);
     f->coh_fft_cfg = dsp_fft_alloc((int)(SFD_COH_LEN * n));
-    if (!f->slot || !f->lockmag || !f->mag || !f->dmag0 || !f->dmag1 || !f->dsum || !f->med ||
+    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->dsum || !f->med || !f->fine_dec ||
         !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in || !f->coh_out ||
         !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
     {
@@ -235,10 +244,10 @@ void sfd_free(struct frame_sync *s)
     free(f->slot);
     free(f->lockmag);
     free(f->mag);
-    free(f->dmag0);
-    free(f->dmag1);
+    free(f->dpair);
     free(f->dsum);
     free(f->med);
+    free(f->fine_dec);
     free(f->fine_dn);
     free(f->fine_up);
     free(f->cx_in);
@@ -275,11 +284,11 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
     return ntau;
 }
 
-/* Median power of a magnitude spectrum; scratch (len floats) is reordered. */
+/* Median power of a power spectrum; scratch (len floats) is reordered. */
 float sfd_median_power(float *scratch, const float *mag, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
-        scratch[i] = mag[i] * mag[i];
+        scratch[i] = mag[i];
     qsort(scratch, len, sizeof(float), sfd_cmp_float);
     return 0.5f * (scratch[len / 2 - 1] + scratch[len / 2]);
 }
@@ -430,20 +439,25 @@ static int sfd_coarse(
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
     }
 
+    /* Pair-slot spectra computed once: each interior slot feeds two q
+     * hypotheses (as q of one and q+1 of the previous). */
+    for (int sl = 0; sl < SFD_DPAIR; sl++)
+        sfd_slot_mag(
+            s, in, (int64_t)(SFD_Q_MIN + sl) * sps, s->upchirp, s->sfd.dpair + (size_t)sl * n4);
+
     float best_score = -HUGE_VALF;
     *q_hat = SFD_Q_MIN;
     *d_hat = 0.0f;
     for (int q = SFD_Q_MIN; q <= SFD_Q_MAX; q++)
     {
-        sfd_slot_mag(s, in, (int64_t)q * sps, s->upchirp, s->sfd.dmag0);
-        sfd_slot_mag(s, in, (int64_t)(q + 1) * sps, s->upchirp, s->sfd.dmag1);
+        const float *m0 = s->sfd.dpair + (size_t)(q - SFD_Q_MIN) * n4;
+        const float *m1 = m0 + n4;
         for (uint32_t i = 0; i < n4; i++)
-            s->sfd.dsum[i] =
-                sqrtf(s->sfd.dmag0[i] * s->sfd.dmag0[i] + s->sfd.dmag1[i] * s->sfd.dmag1[i]);
+            s->sfd.dsum[i] = m0[i] + m1[i];
 
         float dpk;
         float kd = dsp_frac_peak(s->sfd.dsum, n4, &dpk);
-        float score = dpk * dpk;
+        float score = dpk;
         for (int j = -6; j <= -3; j++) // U over the four slots before the pair
             score += upow[q + j + 4];
         // guard: the pair slots' own known-bin power at u is noise at the
@@ -487,16 +501,18 @@ static int sfd_fine(
         int64_t t_cand = (int64_t)q_hat * sps - (int64_t)lroundf(taus[it] * (float)os);
         float u_r = sfd_lock(s, in, t_cand - 8 * sps, 6, u_hat);
 
-        // down-ref slot spectra for the net-id terms (rows = slot + 9), and
-        // the sigma2 slot (the SFD start at shift 0, up-ref)
+        // decimate each unique slot once (offsets -9..2); the down-ref FFTs
+        // (net-id terms, rows = slot + 9) and the up-ref sigma2 FFT (the SFD
+        // start at shift 0) share the decimation
         for (int j = -9; j <= 2; j++)
-            sfd_slot_mag(
+            sfd_slot_dec(s, in, t_cand + (int64_t)j * sps, s->sfd.fine_dec + (size_t)(j + 9) * n);
+        for (int j = -9; j <= 2; j++)
+            sfd_slot_ref_fft(
                 s,
-                in,
-                t_cand + (int64_t)j * sps,
+                s->sfd.fine_dec + (size_t)(j + 9) * n,
                 s->downchirp,
                 s->sfd.fine_dn + (size_t)(j + 9) * n4);
-        sfd_slot_mag(s, in, t_cand, s->upchirp, s->sfd.fine_up);
+        sfd_slot_ref_fft(s, s->sfd.fine_dec + (size_t)9 * n, s->upchirp, s->sfd.fine_up);
 
         // one noise floor per representative, shared by every shift — lam
         // must stay comparable across hypotheses. Zero means the slot sits
