@@ -86,14 +86,12 @@ void demod_cleanup(struct demod_state *s)
 
 #define DEMOD_SNR_BLANK 2 // bins blanked each side of the tone (CFO/STO skirt)
 
-/* On-channel SNR of the last window; see demod.h. Not in the reference.
- * The dechirp folds the spreading gain into the tone bin (10*log10(N) dB
- * above the on-channel SNR); dividing by N undoes it. The floor is the mean
- * of the bins outside a small blank around the tone. */
-float demod_snr(const struct demod_state *s)
+/* Mean bin power outside a blank around the peak: the tone's own energy and
+ * its CFO/STO skirt must not inflate the noise estimate. Not in the reference. */
+static float noise_floor(const struct demod_state *s)
 {
     uint32_t n = s->number_of_bins, b, peak = 0;
-    float mmax = 0, floor_sum = 0, noise, sig;
+    float mmax = 0, sum = 0;
 
     for (b = 0; b < n; b++)
         if (s->fft_mag[b] > mmax)
@@ -107,10 +105,25 @@ float demod_snr(const struct demod_state *s)
         uint32_t d = (b + n - peak) % n;
         if (d <= DEMOD_SNR_BLANK || d >= n - DEMOD_SNR_BLANK)
             continue;
-        floor_sum += s->fft_mag[b];
+        sum += s->fft_mag[b];
     }
 
-    noise = floor_sum / (float)(n - (2 * DEMOD_SNR_BLANK + 1));
+    return sum / (float)(n - (2 * DEMOD_SNR_BLANK + 1));
+}
+
+/* On-channel SNR of the last window; see demod.h. Not in the reference.
+ * The dechirp folds the spreading gain into the tone bin (10*log10(N) dB
+ * above the on-channel SNR); dividing by N undoes it. */
+float demod_snr(const struct demod_state *s)
+{
+    uint32_t n = s->number_of_bins, b;
+    float mmax = 0, noise, sig;
+
+    for (b = 0; b < n; b++)
+        if (s->fft_mag[b] > mmax)
+            mmax = s->fft_mag[b];
+
+    noise = noise_floor(s);
     if (noise <= 0)
         return 0;
 
@@ -172,8 +185,9 @@ int demod_step(struct demod_state *s, const float complex *in)
 /* Soft-output twin of the argmax above; see demod.h. Not in the reference.
  *
  * The bin magnitudes are sufficient statistics for the symbol value. The
- * noncoherent metric uses a = (m_max - floor)/(m_max*floor), floor = mean
- * bin energy — the per-window tone SNR's λ/(1+λ), so it self-calibrates.
+ * noncoherent metric uses a = (m_max - floor)/(m_max*floor), floor = the
+ * blanked noise-floor estimate (noise_floor(): the tone and its skirt must
+ * not inflate it) — the per-window tone SNR's λ/(1+λ), so it self-calibrates.
  * Bit marginals sum the bins whose gray-mapped value carries that bit:
  *   llr[j] = log( (sum_{v: bit j = 1} e^{a(m-m_max)} + eps) /
  *                 (sum_{v: bit j = 0} e^{a(m-m_max)} + eps) )
@@ -182,21 +196,18 @@ int demod_step(struct demod_state *s, const float complex *in)
 void demod_soft_llrs(struct demod_state *s, float *llr)
 {
     float sum[12][2] = {{0}}; // per-bit half-space sums, [j][bit]
-    float floor = 0.0f, mmax = 0.0f, a;
+    float mmax = 0.0f, noise, a;
     uint32_t b;
     uint8_t j;
 
     for (b = 0; b < s->number_of_bins; b++)
-    {
-        floor += s->fft_mag[b];
         if (s->fft_mag[b] > mmax)
             mmax = s->fft_mag[b];
-    }
-    floor /= (float)s->number_of_bins;
 
+    noise = noise_floor(s);
     // a = lambda/(1+lambda) in floor units; 0 (no information) when the
     // spectrum is flat or silent
-    a = (mmax > floor && floor > 0.0f) ? (mmax - floor) / (mmax * floor) : 0.0f;
+    a = (mmax > noise && noise > 0.0f) ? (mmax - noise) / (mmax * noise) : 0.0f;
 
     for (b = 0; b < s->number_of_bins; b++)
     {

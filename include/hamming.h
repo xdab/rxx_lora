@@ -18,8 +18,11 @@
  * @param[in] llr cw_len = cr+4 chip LLRs, MSB-first, packing the bits the
  *            candidate encoder asserts (llr[k] > 0 means bit k is more likely 1)
  * @param[in] cr coding rate: 1..4
+ * @param[out] alt optional; the runner-up candidate's nibble, NULL to skip
+ * @param[out] margin optional; best minus second-best score — the codeword's
+ *             reliability for chase-style retries, NULL to skip
  * @return the 4-bit data nibble
  */
-uint8_t hamming_decode_soft(const float *llr, uint8_t cr);
+uint8_t hamming_decode_soft(const float *llr, uint8_t cr, uint8_t *alt, float *margin);
 
 #endif // HAMMING_H

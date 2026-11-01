@@ -195,7 +195,7 @@ def main():
         help="noise sigma per component (sqrt(10)); scale-invariant, not an axis",
     )
     p.add_argument(
-        "--os", type=int, default=8, help="samples per chip (must match the binary's -o)"
+        "--os", type=int, default=2, help="samples per chip (must match the binary's -o)"
     )
     p.add_argument("--pad-only", action="store_true", help="zeros instead of noise (control arm)")
     p.add_argument(

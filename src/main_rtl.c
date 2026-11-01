@@ -33,12 +33,16 @@ static void usage(void)
                  "\n"
                  "Use:\t" APP_NAME " --center-freq HZ [-options]\n"
                  "\t[-d N]   RTL-SDR device index (default: 0)\n"
-                 "\t[-s sf]  spreading factor, 5..12 (default: 7)\n"
+                 "\t[-s sf]  spreading factor, 5..12 (default: 9)\n"
                  "\t[-o os]  oversampling factor, 1..255 (default: 2)\n"
                  "\t[-p pre] preamble detection windows to average (default: 8)\n"
                  "\t[-a avg] detector correlation budget K, 1..255 (default: 4)\n"
                  "\t[-w id]  hex sync word to filter by: 0x12 gr-lora,\n"
                  "\t         0x2b Meshtastic; omit to accept any\n"
+                 "\t[--chase] chase-II retry: on a payload CRC fail, re-decode the\n"
+                 "\t         least-reliable codewords on their runner-ups\n"
+                 "\t[--chase-k N] [--chase-tau X] retry tuning with --chase\n"
+                 "\t         (defaults: 8 suspects, LLR-loss budget 1.0)\n"
                  "\t[-g db]  tuner gain in dB (default: automatic)\n"
                  "\t[--ppm N] frequency correction in ppm (default: 0)\n"
                  "\t[-T]     enable bias-T on GPIO pin 0\n"
@@ -87,6 +91,7 @@ int main(int argc, char **argv)
     int preamble_avg = 8;
     int detect_avg = 4;
     long sync_word_filter = 0;
+    struct chase_config chase = CHASE_CONFIG_DEFAULTS;
     int conjugate_iq = 0;
     int dc_block = 0;
     double center_freq = 0.0; // required: an RTL-SDR must be tuned
@@ -105,7 +110,10 @@ int main(int argc, char **argv)
         OPT_CENTER_FREQ,
         OPT_BW,
         OPT_INPUT_RATE,
-        OPT_PPM
+        OPT_PPM,
+        OPT_CHASE,
+        OPT_CHASE_K,
+        OPT_CHASE_TAU,
     };
     static const struct option long_opts[] = {
         {"conj", no_argument, NULL, OPT_CONJ},
@@ -114,6 +122,9 @@ int main(int argc, char **argv)
         {"bw", required_argument, NULL, OPT_BW},
         {"input-rate", required_argument, NULL, OPT_INPUT_RATE},
         {"ppm", required_argument, NULL, OPT_PPM},
+        {"chase", no_argument, NULL, OPT_CHASE},
+        {"chase-k", required_argument, NULL, OPT_CHASE_K},
+        {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
         {NULL, 0, NULL, 0},
     };
 
@@ -139,6 +150,15 @@ int main(int argc, char **argv)
             break;
         case 'w':
             sync_word_filter = (long)strtoul(optarg, NULL, 0);
+            break;
+        case OPT_CHASE:
+            chase.enabled = 1;
+            break;
+        case OPT_CHASE_K:
+            chase.k = (int)strtol(optarg, NULL, 10);
+            break;
+        case OPT_CHASE_TAU:
+            chase.tau = strtof(optarg, NULL);
             break;
         case 'g':
             gain_db = strtod(optarg, NULL);
@@ -190,7 +210,7 @@ int main(int argc, char **argv)
 
     if (preamble_avg < 6 || sf < 5 || sf > 12 || os < 1 || os > 255 || detect_avg < 1 ||
         detect_avg > 255 || sync_word_filter < 0 || sync_word_filter > 0xff || center_freq <= 0.0 ||
-        bandwidth <= 0.0 || capture_rate < 0.0 || timeout_s < 0.0)
+        bandwidth <= 0.0 || capture_rate < 0.0 || timeout_s < 0.0 || chase.k < 1 || chase.k > 8)
     {
         if (center_freq <= 0.0)
             (void)fprintf(stderr, "RTL needs --center-freq\n");
@@ -252,8 +272,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    struct receiver *rx =
-        receiver_create(sf, os, preamble_avg, sync_word_filter, detect_avg, center_freq, bandwidth);
+    struct receiver *rx;
+    {
+        struct receiver_config cfg = {
+            .sf = sf,
+            .os = os,
+            .preamble_avg = preamble_avg,
+            .sync_word = sync_word_filter,
+            .detect_avg = detect_avg,
+            .center_freq = center_freq,
+            .bandwidth = bandwidth,
+            .chase = chase,
+        };
+        rx = receiver_create(&cfg);
+    }
     if (!rx)
     {
         source_destroy(src);
@@ -281,6 +313,9 @@ int main(int argc, char **argv)
         log_info("filtering by sync word (net-id) 0x%02lx\n", sync_word_filter);
     else
         log_info("no sync word filter (any net-id accepted)\n");
+
+    if (chase.enabled)
+        log_info("chase-II retry on: k=%d tau=%g\n", chase.k, (double)chase.tau);
 
     log_info("listening... (Ctrl-C to stop)\n");
 

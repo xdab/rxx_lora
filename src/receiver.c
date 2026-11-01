@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "crc.h"
 #include "deinterleave.h"
@@ -38,6 +39,7 @@ struct receiver
 {
     struct frame_sync *fs;
     struct demod_state demod; // allocated once, reset per frame
+    struct chase_config chase;
     int sf;
 };
 
@@ -101,14 +103,32 @@ static int next_symbol(
     return 0;
 }
 
+// one payload codeword's runner-up candidate, its flip LLR loss (best minus
+// second-best soft score) and the codeword's LLR mass
+struct cw_suspect
+{
+    uint8_t alt; // runner-up candidate nibble
+    float marg;  // best minus second-best soft score
+    float norm;  // the codeword's LLR mass
+};
+
 /*
  * Deinterleave one block and soft-decode its codewords: the single
  * block-LLRs -> nibbles seam. Header: 8 symbols, sf-2 codewords, cr 4.
  * Payload: cr+4 symbols, sf codewords, the frame's cr.
  *
+ * @param suspects optionally receives each codeword's runner-up record;
+ *        NULL skips
+ *
  * @return the number of nibbles written, or -1 on a malformed block size
  */
-static int decode_block(const float (*sym_llr)[MAX_SF], int n_sym, int n_cw, int cr, uint8_t *nib)
+static int decode_block(
+    const float (*sym_llr)[MAX_SF],
+    int n_sym,
+    int n_cw,
+    int cr,
+    uint8_t *nib,
+    struct cw_suspect *suspects)
 {
     float cw_llr[MAX_SF][MAX_SF];
     int i;
@@ -119,7 +139,20 @@ static int decode_block(const float (*sym_llr)[MAX_SF], int n_sym, int n_cw, int
     deinterleave_soft(sym_llr, (uint8_t)n_sym, (uint8_t)n_cw, cw_llr);
 
     for (i = 0; i < n_cw; i++)
-        nib[i] = hamming_decode_soft(cw_llr[i], (uint8_t)cr);
+    {
+        if (suspects)
+        {
+            float s = 0;
+            for (uint8_t j = 0; j < (uint8_t)(cr + 4); j++)
+                s += fabsf(cw_llr[i][j]);
+            suspects[i].norm = s;
+        }
+        nib[i] = hamming_decode_soft(
+            cw_llr[i],
+            (uint8_t)cr,
+            suspects ? &suspects[i].alt : NULL,
+            suspects ? &suspects[i].marg : NULL);
+    }
 
     return n_cw;
 }
@@ -159,6 +192,99 @@ static enum frame_decode finish_frame(
 }
 
 /*
+ * Chase retry, CRC-arbitrated: from the K least-reliable payload codewords
+ * (suspects: margin under CHASE_MARG of their LLR mass), enumerate runner-up
+ * flips, singles then pairs; a CRC-passing combo is accepted by lowest total
+ * flip LLR loss, within the budget cc->tau — a wrong combo must be both
+ * CRC-consistent and metrically plausible.
+ *
+ * @return 1 on a rescued frame (out filled), 0 if no combo verified
+ */
+#define CHASE_MARG 0.2f // a suspect's margin must be under this share of its LLR mass
+
+static int chase_retry(
+    const struct chase_config *cc,
+    const uint8_t *nibs,
+    const struct cw_suspect *suspects,
+    uint32_t nnib,
+    uint32_t pay_nib,
+    const struct lora_header *h,
+    struct frame_result *out)
+{
+    uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES + 4] = {0};
+    uint32_t sel[2 * MAX_BYTES + 4];
+    struct frame_result res, best_res;
+    float tau = cc->tau;
+    float best_loss = 0;
+    int k = cc->k, n_sel = 0, s, t, found = 0;
+
+    if (k < 1 || pay_nib == 0 || pay_nib > nnib)
+        return 0;
+    if (pay_nib < (uint32_t)k)
+        k = (int)pay_nib;
+
+    // suspects: the k payload nibbles with the smallest margins; the CRC
+    // nibbles are appended outside the K budget — they must not crowd
+    // payload suspects out
+    for (s = 0; s < k; s++)
+    {
+        uint32_t best = pay_nib;
+        for (uint32_t i = 0; i < pay_nib; i++)
+        {
+            if (used[i])
+                continue;
+            if (suspects[i].marg > CHASE_MARG * suspects[i].norm)
+                continue;
+            if (best == pay_nib || suspects[i].marg < suspects[best].marg)
+                best = i;
+        }
+        if (best == pay_nib)
+            break;
+        used[best] = 1;
+        sel[n_sel++] = best;
+    }
+    for (uint32_t i = pay_nib; i < nnib; i++) // the CRC nibbles, same gate
+        if (suspects[i].marg <= CHASE_MARG * suspects[i].norm)
+            sel[n_sel++] = i;
+
+    // singles, selection order
+    for (s = 0; s < n_sel; s++)
+    {
+        memcpy(tmp, nibs, nnib);
+        tmp[sel[s]] = suspects[sel[s]].alt;
+        if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK)
+        {
+            found = 1;
+            best_loss = suspects[sel[s]].marg;
+            best_res = res;
+            break;
+        }
+    }
+
+    // pairs
+    for (s = 1; s < n_sel; s++)
+        for (t = 0; t < s; t++)
+        {
+            float loss = suspects[sel[s]].marg + suspects[sel[t]].marg;
+            memcpy(tmp, nibs, nnib);
+            tmp[sel[s]] = suspects[sel[s]].alt;
+            tmp[sel[t]] = suspects[sel[t]].alt;
+            if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
+            {
+                found = 1;
+                best_loss = loss;
+                best_res = res;
+            }
+        }
+
+    if (!found || (tau >= 0 && best_loss > tau))
+        return 0;
+    *out = best_res;
+    log_info("chase: rescued, flip LLR loss %.1f\n", (double)best_loss);
+    return 1;
+}
+
+/*
  * Decode one frame: header block -> handshake -> payload blocks.
  *
  * The header block unlocks the symbol budget (frame_sync_set_symbol_budget);
@@ -171,10 +297,12 @@ static enum frame_decode decode_frame(
     struct demod_state *fd,
     size_t *pos,
     struct frame_result *out,
-    struct frame_sync_status *st)
+    struct frame_sync_status *st,
+    const struct chase_config *cc)
 {
     float sllr[HEADER_SYMBOLS][MAX_SF];
     uint8_t hnib[MAX_SF], nibs[2 * MAX_BYTES + 4];
+    struct cw_suspect suspects[2 * MAX_BYTES + 4]; // chase-retry suspects per codeword
     uint32_t nnib = 0, needed, i;
     uint8_t cw_len, nb = 0;
     struct lora_header h;
@@ -199,7 +327,7 @@ static enum frame_decode decode_frame(
     // referenced to the full channel bandwidth
     out->snr_db = 10.f * log10f(snr_acc / (float)HEADER_SYMBOLS);
 
-    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib) < 0)
+    if (decode_block(sllr, HEADER_SYMBOLS, sf - 2, 4, hnib, NULL) < 0)
         return DECODE_HEADER;
 
     if (decode_header(hnib, &h) != 0)
@@ -232,6 +360,7 @@ static enum frame_decode decode_frame(
     while (nnib < needed)
     {
         uint8_t pnib[MAX_SF];
+        struct cw_suspect psus[MAX_SF];
         int n;
 
         if (next_symbol(src, fs, fd, pos, sllr[nb], st) < 0)
@@ -239,11 +368,15 @@ static enum frame_decode decode_frame(
         if (++nb < cw_len)
             continue;
 
-        n = decode_block(sllr, cw_len, sf, h.cr, pnib);
+        n = decode_block(sllr, cw_len, sf, h.cr, pnib, psus);
         if (n < 0)
             return DECODE_HEADER;
         for (i = 0; i < (uint32_t)n && nnib < needed; i++)
-            nibs[nnib++] = pnib[i];
+        {
+            nibs[nnib] = pnib[i];
+            suspects[nnib] = psus[i];
+            nnib++;
+        }
         nb = 0;
     }
     if (nnib < needed)
@@ -252,7 +385,11 @@ static enum frame_decode decode_frame(
         return DECODE_TRUNCATED;
     }
 
-    return finish_frame(nibs, nnib, &h, out);
+    enum frame_decode verdict = finish_frame(nibs, nnib, &h, out);
+    if (verdict == DECODE_CRC_BAD && cc->enabled &&
+        chase_retry(cc, nibs, suspects, nnib, 2u * h.pay_len, &h, out))
+        verdict = DECODE_CRC_OK;
+    return verdict;
 }
 
 /*
@@ -410,36 +547,30 @@ static void report_frame(
     output_frame(&rec);
 }
 
-struct receiver *receiver_create(
-    int sf,
-    int os,
-    int preamble_avg,
-    long sync_word,
-    int detect_avg,
-    double center_freq,
-    double bandwidth)
+struct receiver *receiver_create(const struct receiver_config *cfg)
 {
     struct receiver *r = calloc(1, sizeof(*r));
 
     if (!r)
         return NULL;
 
-    r->sf = sf;
+    r->chase = cfg->chase;
+    r->sf = cfg->sf;
     r->fs = frame_sync_create(
-        (uint8_t)sf,
-        (uint8_t)os,
-        (uint16_t)preamble_avg,
-        (uint32_t)sync_word,
-        (uint32_t)center_freq,
-        (uint32_t)bandwidth,
-        (uint8_t)detect_avg);
+        (uint8_t)cfg->sf,
+        (uint8_t)cfg->os,
+        (uint16_t)cfg->preamble_avg,
+        (uint32_t)cfg->sync_word,
+        (uint32_t)cfg->center_freq,
+        (uint32_t)cfg->bandwidth,
+        (uint8_t)cfg->detect_avg);
     if (!r->fs)
     {
         free(r);
         return NULL;
     }
 
-    if (demod_init(&r->demod, (uint8_t)sf) < 0)
+    if (demod_init(&r->demod, (uint8_t)cfg->sf) < 0)
     {
         frame_sync_destroy(r->fs);
         free(r);
@@ -490,7 +621,8 @@ int receiver_run(struct receiver *r, struct source *src)
             n_synced++;
 
             demod_reset(&r->demod, st.cfo);
-            enum frame_decode verdict = decode_frame(src, fs, &r->demod, &pos, &res, &st);
+            enum frame_decode verdict =
+                decode_frame(src, fs, &r->demod, &pos, &res, &st, &r->chase);
 
             switch (verdict)
             {

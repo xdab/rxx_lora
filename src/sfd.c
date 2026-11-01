@@ -10,8 +10,8 @@
  *                 downchirp evidence (downchirp x upchirp = tone at f - tau)
  *   pairing       tau = wrap(u - d)/2, f = wrap(u - tau); N/2 ambiguity
  *                 resolved by |f| <= N/4
- *   two-pass      re-time by tau, re-lock, known-bin tests on the pure grid,
- *                 scored in noise-power units (lam) over slot shifts
+ *   two-pass      re-time by tau, re-lock, coherent known-bin scoring over
+ *                 slot shifts, in noise-power units (lam)
  *   gate          lam >= SFD_LAM_GATE in worded mode; accept-any skips the
  *                 gate (no expected sync word -> other scale)
  */
@@ -28,22 +28,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-// SFD start, windows past the fire: 6 for a prompt fire (plen + 3 - n_up_req),
-// less when averaging or resets delay the run; the +-2 fine shifts extend both
-// ends
+// SFD start, windows past the fire; the fine shifts extend both ends
 #define SFD_Q_MIN 2
 #define SFD_Q_MAX 8
 // fine-pass slot shifts around the re-timed candidate, in windows
-#define SFD_SHIFT_MIN (-2)
-#define SFD_SHIFT_MAX 2
+#define SFD_SHIFT_MIN (-3)
+#define SFD_SHIFT_MAX 3
 
-// slot offsets covered: change-point U slots q-6..q+1 for q in [2, 8] ->
-// -4..5; fine-pass down slots (shift + m for m in [-6, -1]) -> -8..1, up
-// slots (shift + {0, 1}) -> -2..3
-#define SFD_U_SLOTS 10
+// slot offsets covered: change-point U slots q-6..q-3 for q in [2, 8] ->
+// -4..5, plus the guard's pair slots q, q+1 -> 2..9; fine-pass down slots
+// (shift + m for m in [-6, -1], shift in [-3, 3]) -> -9..2, up slots
+// (shift + {0, 1}) -> -3..4
+#define SFD_U_SLOTS 14
 #define SFD_MAX_CANDIDATES (SFD_MAX_TAU_REPS * (SFD_SHIFT_MAX - SFD_SHIFT_MIN + 1))
 
-// noise-only p_0.001 of the worded score
+// coherent-group FFT length: 4x padding of the longest group (4 slots)
+#define SFD_COH_LEN (16u) // x N, set at alloc time
+
+// the fine D group's scan half-window around u_r, bins: on the re-timed grid
+// the downchirp tone sits slightly off u_r, so the test scans for it
+#define SFD_COH_D_W 6.0f
+
+// noise-only p_0.001 of the worded score; a coarse pre-filter — the net-id
+// read arbitrates
 #define SFD_LAM_GATE 32.5f
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // qsort comparator
@@ -190,11 +197,14 @@ int sfd_alloc(struct frame_sync *s)
     f->fine_up = malloc((size_t)SFD_FINE_UP * 4 * n * sizeof(*f->fine_up));
     f->cx_in = malloc(f->lock_len * sizeof(*f->cx_in));
     f->cx_out = malloc(f->lock_len * sizeof(*f->cx_out));
+    f->coh_in = malloc((size_t)SFD_COH_LEN * n * sizeof(*f->coh_in));
+    f->coh_out = malloc((size_t)SFD_COH_LEN * n * sizeof(*f->coh_out));
     f->slot_fft_cfg = dsp_fft_alloc(4 * (int)n);
     f->lock_fft_cfg = dsp_fft_alloc((int)f->lock_len);
+    f->coh_fft_cfg = dsp_fft_alloc((int)(SFD_COH_LEN * n));
     if (!f->slot || !f->lockmag || !f->mag || !f->dmag0 || !f->dmag1 || !f->dsum || !f->med ||
-        !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->slot_fft_cfg ||
-        !f->lock_fft_cfg)
+        !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in || !f->coh_out ||
+        !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
     {
         sfd_free(s);
         return -1;
@@ -237,6 +247,8 @@ void sfd_free(struct frame_sync *s)
         dsp_fft_free(f->slot_fft_cfg);
     if (f->lock_fft_cfg)
         dsp_fft_free(f->lock_fft_cfg);
+    if (f->coh_fft_cfg)
+        dsp_fft_free(f->coh_fft_cfg);
     memset(f, 0, sizeof(*f));
 }
 
@@ -253,7 +265,9 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
         float t = util_wrap(raw_taus[i], n);
         int dup = 0;
         for (int j = 0; j < ntau; j++)
-            if (taus[j] == t)
+            // float wrap leaves the +-N/2 pair epsilon apart; an exact
+            // compare duplicates the whole candidate set
+            if (fabsf(taus[j] - t) < 0.5f)
                 dup = 1;
         if (!dup)
             taus[ntau++] = t;
@@ -270,39 +284,100 @@ float sfd_median_power(float *scratch, const float *mag, uint32_t len)
     return 0.5f * (scratch[len / 2 - 1] + scratch[len / 2]);
 }
 
+/* Peak known-bin power of `count` coherently concatenated slots from `off`,
+ * dechirped by `ref`, scanned over +-w bins (N-scale) around u_r when w > 0.
+ * Concatenating before the FFT keeps the tone phase-continuous, so the
+ * combined evidence stays low-variance. */
+static float sfd_coh_pow(
+    struct frame_sync *s,
+    const float complex *in,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (offset, count) config-style
+    int64_t off,
+    int count,
+    const float complex *ref,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (tone, scan width) one call per term
+    float u_r,
+    float w)
+{
+    const uint32_t n = s->number_of_bins;
+    const uint32_t len = SFD_COH_LEN * n;
+
+    for (int i = 0; i < count; i++)
+    {
+        sfd_slot_dec(s, in, off + (int64_t)i * (int64_t)s->samples_per_symbol, s->sfd.slot);
+        for (uint32_t j = 0; j < n; j++)
+        {
+            float complex v = s->sfd.slot[j] * ref[j];
+            s->sfd.coh_in[(size_t)i * n + j].r = crealf(v);
+            s->sfd.coh_in[(size_t)i * n + j].i = cimagf(v);
+        }
+    }
+    memset(
+        s->sfd.coh_in + (size_t)count * n,
+        0,
+        (size_t)(len - (size_t)count * n) * sizeof(*s->sfd.coh_in));
+    dsp_fft(s->sfd.coh_fft_cfg, s->sfd.coh_in, s->sfd.coh_out);
+    long b0 = lroundf(u_r * (float)SFD_COH_LEN) % (long)len;
+    if (b0 < 0)
+        b0 += len;
+    int steps = w > 0.0f ? (int)lroundf(w * (float)SFD_COH_LEN) : 0;
+    float best = 0.0f;
+    for (int st = -steps; st <= steps; st++)
+    {
+        long b = (b0 + st + len) % len;
+        for (long i = b - 1; i <= b + 2; i++)
+        {
+            float re = s->sfd.coh_out[(i + len) % len].r, im = s->sfd.coh_out[(i + len) % len].i;
+            float p = re * re + im * im;
+            if (p > best)
+                best = p;
+        }
+    }
+    return best;
+}
+
 /* The fine score of one slot shift: known-bin evidence in noise-power units.
- * dn/up are the representative's reference spectra (SFD_FINE_DN / SFD_FINE_UP
- * rows of 4N), indexed by the shift; sync_words[0] != 0 adds the net-id terms. */
+ * The preamble and SFD groups are scored coherently (sfd_coh_pow); the net-id
+ * terms are per-slot (different tones each). dn holds the down-ref spectra
+ * (SFD_FINE_DN rows of 4N, row = slot + 9); sync_words[0] != 0 adds the
+ * net-id terms. sigma2 is the representative's noise floor (per 4N-bin). */
 float sfd_shift_lam(
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (down-ref, up-ref spectra)
-    const float *dn,
-    const float *up,
-    uint32_t n,
+    struct frame_sync *s,
+    const float complex *in,
+    int64_t t_cand,
     int shift,
     float u_r,
     float sigma2,
     const uint16_t *sync_words)
 {
-    const uint32_t n4 = 4u * n;
+    const uint32_t n = s->number_of_bins;
+    const int64_t sps = (int64_t)s->samples_per_symbol;
 
-    float lam = 0.0f;
-    for (int m = -6; m <= -3; m++) // preamble at u_r
-        lam += sfd_bin_pow(dn + (size_t)(shift + m + 8) * n4, n, u_r) / sigma2 - 1.0f;
-    float d_known = util_modf(u_r, n); // on the pure grid d = u
-    lam += sfd_bin_pow(up + (size_t)(shift + 2) * n4, n, d_known) / sigma2 - 1.0f;
-    lam += sfd_bin_pow(up + (size_t)(shift + 3) * n4, n, d_known) / sigma2 - 1.0f;
+    // preamble group: 4 slots ending 3 before the SFD, tone at u_r
+    float lam = sfd_coh_pow(s, in, t_cand + (int64_t)(shift - 6) * sps, 4, s->downchirp, u_r, 0) /
+                    (4.0f * sigma2) -
+                1.0f;
+    // SFD group: the pair of downchirp slots at the candidate's edge
+    float dgr = sfd_coh_pow(s, in, t_cand + (int64_t)shift * sps, 2, s->upchirp, u_r, SFD_COH_D_W) /
+                    (2.0f * sigma2) -
+                1.0f;
+    float net = 0.0f;
     if (sync_words[0] != 0)
     { // the pair at f + w0 / f + w1: positive net-id evidence
-        lam += sfd_bin_pow(
-                   dn + (size_t)(shift - 2 + 8) * n4, n, util_modf(u_r + (float)sync_words[0], n)) /
+        net += sfd_bin_pow(
+                   s->sfd.fine_dn + (size_t)(shift - 2 + 9) * 4 * n,
+                   n,
+                   util_modf(u_r + (float)sync_words[0], n)) /
                    sigma2 -
                1.0f;
         lam += sfd_bin_pow(
-                   dn + (size_t)(shift - 1 + 8) * n4, n, util_modf(u_r + (float)sync_words[1], n)) /
+                   s->sfd.fine_dn + (size_t)(shift - 1 + 9) * 4 * n,
+                   n,
+                   util_modf(u_r + (float)sync_words[1], n)) /
                    sigma2 -
                1.0f;
     }
-    return lam;
+    return lam + dgr + net;
 }
 
 /* Best candidate by lam; the margin over the best other through *margin.
@@ -348,8 +423,8 @@ static int sfd_coarse(
     /* Change point over candidate SFD starts q windows past the fire:
      * known-bin power at u, plus the candidate's two windows dechirped by
      * the upchirp (downchirp evidence). */
-    float upow[SFD_U_SLOTS]; // slot offsets -4..5, index o + 4
-    for (int o = -4; o <= 5; o++)
+    float upow[SFD_U_SLOTS]; // slot offsets -4..9, index o + 4
+    for (int o = -4; o <= 9; o++)
     {
         sfd_slot_mag(s, in, (int64_t)o * sps, s->downchirp, s->sfd.mag);
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
@@ -371,6 +446,9 @@ static int sfd_coarse(
         float score = dpk * dpk;
         for (int j = -6; j <= -3; j++) // U over the four slots before the pair
             score += upow[q + j + 4];
+        // guard: the pair slots' own known-bin power at u is noise at the
+        // true change point and two full preamble tones one slot early
+        score -= upow[q + 4] + upow[q + 5];
         if (score > best_score)
         {
             best_score = score;
@@ -409,34 +487,28 @@ static int sfd_fine(
         int64_t t_cand = (int64_t)q_hat * sps - (int64_t)lroundf(taus[it] * (float)os);
         float u_r = sfd_lock(s, in, t_cand - 8 * sps, 6, u_hat);
 
-        // slot spectra once per representative; the shift scan re-indexes
-        for (int j = -8; j <= 1; j++)
+        // down-ref slot spectra for the net-id terms (rows = slot + 9), and
+        // the sigma2 slot (the SFD start at shift 0, up-ref)
+        for (int j = -9; j <= 2; j++)
             sfd_slot_mag(
                 s,
                 in,
                 t_cand + (int64_t)j * sps,
                 s->downchirp,
-                s->sfd.fine_dn + (size_t)(j + 8) * n4);
-        for (int j = -2; j <= 3; j++)
-            sfd_slot_mag(
-                s,
-                in,
-                t_cand + (int64_t)j * sps,
-                s->upchirp,
-                s->sfd.fine_up + (size_t)(j + 2) * n4);
+                s->sfd.fine_dn + (size_t)(j + 9) * n4);
+        sfd_slot_mag(s, in, t_cand, s->upchirp, s->sfd.fine_up);
 
         // one noise floor per representative, shared by every shift — lam
         // must stay comparable across hypotheses. Zero means the slot sits
         // in the stream's zero padding: nothing to score
-        float med = sfd_median_power(s->sfd.med, s->sfd.fine_up + (size_t)2 * n4, n4);
+        float med = sfd_median_power(s->sfd.med, s->sfd.fine_up, n4);
         if (med <= 1e-12f)
             continue;
         float sigma2 = med / 0.6931472f + 1e-12f;
 
         for (int shift = SFD_SHIFT_MIN; shift <= SFD_SHIFT_MAX; shift++)
         {
-            cands[ncand].lam =
-                sfd_shift_lam(s->sfd.fine_dn, s->sfd.fine_up, n, shift, u_r, sigma2, s->sync_words);
+            cands[ncand].lam = sfd_shift_lam(s, in, t_cand, shift, u_r, sigma2, s->sync_words);
             cands[ncand].base = t_cand + (int64_t)shift * sps;
             cands[ncand].tau = taus[it];
             cands[ncand].u = u_r;

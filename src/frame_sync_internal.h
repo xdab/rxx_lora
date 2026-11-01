@@ -34,9 +34,10 @@ enum frame_sync_subphase
 /** Anti-alias FIR length for the SFD slot pipeline (src/sfd.c). */
 #define SFD_FIR_TAPS 65
 
-/** Fine-pass reference spectra: down-ref and up-ref slots (x 4N each). */
-#define SFD_FINE_DN 10
-#define SFD_FINE_UP 6
+/** Fine-pass reference spectra: down-ref slots (x 4N each); the up-ref row
+ *  holding the sigma2 slot (the SFD start at shift 0). */
+#define SFD_FINE_DN 12
+#define SFD_FINE_UP 1
 
 /** Pairing representatives: (tau, f) and (tau +- N/2, f +- N/2) at most. */
 #define SFD_MAX_TAU_REPS 3
@@ -64,10 +65,13 @@ struct sfd
     float *mag;              // one slot magnitude spectrum (4N)
     float *dmag0;            // change-point D spectra (4N each)
     float *dmag1;
-    float *dsum;    // sqrt-power-sum scratch over the D pair (4N)
-    float *med;     // median scratch (4N)
-    float *fine_dn; // fine-pass down-ref spectra (SFD_FINE_DN x 4N)
-    float *fine_up; // fine-pass up-ref spectra (SFD_FINE_UP x 4N)
+    float *dsum;       // sqrt-power-sum scratch over the D pair (4N)
+    float *med;        // median scratch (4N)
+    float *fine_dn;    // fine-pass down-ref spectra (SFD_FINE_DN x 4N)
+    float *fine_up;    // fine-pass sigma2 slot spectrum (SFD_FINE_UP x 4N)
+    void *coh_fft_cfg; // coherent-group FFT plan, 16N points
+    dsp_cpx *coh_in;   // coherent-group input scratch (4N)
+    dsp_cpx *coh_out;  // coherent-group output scratch (16N)
 };
 
 /** SFD-first coarse-sync outcome (src/sfd.c): the frame-grid decision at the
@@ -243,13 +247,14 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS]);
 float sfd_median_power(float *scratch, const float *mag, uint32_t len);
 
 /** @brief Fine score of one slot shift: known-bin evidence in noise-power
- *        units. @p dn / @p up are the representative's reference spectra
- *        (SFD_FINE_DN / SFD_FINE_UP rows of 4N), indexed by @p shift;
+ *        units. The preamble and SFD groups are scored coherently over the
+ *        slots at @p t_cand + shift; @p dn holds the down-ref spectra
+ *        (SFD_FINE_DN rows of 4N, row = slot + 9) for the net-id terms;
  *        sync_words[0] != 0 adds the net-id terms. */
 float sfd_shift_lam(
-    const float *dn,
-    const float *up,
-    uint32_t n,
+    struct frame_sync *s,
+    const float complex *in,
+    int64_t t_cand,
     int shift,
     float u_r,
     float sigma2,

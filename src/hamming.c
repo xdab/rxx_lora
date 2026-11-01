@@ -35,11 +35,11 @@ static uint8_t hamming_encode_nibble(uint8_t nib, uint8_t cr)
                      (4 - cr));
 }
 
-uint8_t hamming_decode_soft(const float *llr, uint8_t cr)
+uint8_t hamming_decode_soft(const float *llr, uint8_t cr, uint8_t *alt, float *margin)
 {
     uint8_t cw_len = (uint8_t)(cr + 4);
-    uint8_t best_nib = 0;
-    float best_score = -1e30f; // |score| <= 2*sum|llr|, far below this
+    uint8_t best_nib = 0, alt_nib = 0;
+    float best_score = -1e30f, alt_score = -1e30f; // |score| <= 2*sum|llr|, far below
 
     for (uint8_t nib = 0; nib < 16; nib++)
     {
@@ -49,9 +49,21 @@ uint8_t hamming_decode_soft(const float *llr, uint8_t cr)
             score += CODEWORD_BIT(cw, k, cw_len) ? llr[k] : -llr[k];
         if (score > best_score)
         {
+            alt_score = best_score;
+            alt_nib = best_nib;
             best_score = score;
             best_nib = nib;
         }
+        else if (score > alt_score)
+        {
+            alt_score = score;
+            alt_nib = nib;
+        }
     }
+
+    if (alt)
+        *alt = alt_nib;
+    if (margin)
+        *margin = best_score - alt_score;
     return best_nib;
 }
