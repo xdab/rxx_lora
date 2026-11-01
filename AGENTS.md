@@ -42,7 +42,7 @@ IQ (frame.py) and, for the noise arm, the channel degradation (AWGN).
 `tools/regression_perf.py` is its speed twin. Some quality verdicts,
 but primarily RTx measurement — a real-time multiplier: seconds of IQ
 consumed per second of wall time (above 1 means faster than real time).
-Mind the defaults mismatch: the binaries run `-o 2`, the Python tools `--os 8`;
+The Python tools default to `--os 2`, matching the binaries' `-o 2`;
 cross-check os/sf/bw whenever they meet.
 
 ## Quality gates

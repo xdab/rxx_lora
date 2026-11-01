@@ -178,7 +178,7 @@ def main() -> None:
         "logs", nargs="*", help="existing ber.py sweep logs to plot instead of running sweeps"
     )
     p.add_argument("--sfs", default="7-12", help="SF list to sweep, e.g. '7,9,12' or '7-12'")
-    p.add_argument("--os", type=int, default=8, help="oversampling (samples/chip)")
+    p.add_argument("--os", type=int, default=2, help="oversampling (samples/chip)")
     p.add_argument("--snr-step", type=float, default=2, help="SNR step [dB]")
     p.add_argument(
         "--snr-min", type=float, default=None, help="override the per-SF SNR window start [dB]"

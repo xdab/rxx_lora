@@ -214,8 +214,8 @@ static int chase_retry(
     const struct lora_header *h,
     struct frame_result *out)
 {
-    uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES] = {0};
-    uint32_t sel[8];
+    uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES + 4] = {0};
+    uint32_t sel[2 * MAX_BYTES + 4];
     struct frame_result res, best_res;
     float tau = cc->tau;
     float best_loss = 0;
@@ -227,7 +227,15 @@ static int chase_retry(
         k = (int)pay_nib;
 
     // partial selection: the k flippable payload nibbles with the smallest
-    // margins
+    // margins. The CRC nibbles are appended afterwards, outside the K
+    // budget: about 10 frames per 24k arrive with a byte-perfect payload and
+    // the four CRC codewords themselves wrong, and the payload-only flip set
+    // cannot rescue those (the CRC is the check) — but letting the CRC
+    // nibbles compete for the K budget crowds payload suspects out and was
+    // a measured net loss. A CRC-nibble flip on a byte-perfect payload
+    // costs zero payload loss, the most plausible solution in the whole
+    // set; on a corrupt payload it can only manufacture consistency, which
+    // the tau budget must reject.
     for (s = 0; s < k; s++)
     {
         uint32_t best = pay_nib;
@@ -245,6 +253,9 @@ static int chase_retry(
         used[best] = 1;
         sel[n_sel++] = best;
     }
+    for (uint32_t i = pay_nib; i < nnib; i++) // the four CRC nibbles, same gate
+        if (fuel[i].marg <= CHASE_MARG * fuel[i].norm)
+            sel[n_sel++] = i;
 
     // singles, worst margin first: losses ascend with s, so the first pass
     // is also the cheapest single

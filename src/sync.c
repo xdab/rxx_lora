@@ -283,10 +283,17 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
 
 /* Strongest distinct tones of fft_mag, strongest first, no two within
  * +-2 bins (chirp band wraps). Returns the tone count. */
-static int netid_top_tones(const struct frame_sync *s, int k, int *bins, float *mags)
+static int netid_top_tones(
+    const struct frame_sync *s,
+    int k,
+    int *bins,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (mags, mean) per-spectrum outputs
+    float *mags,
+    float *mean)
 {
     const uint32_t n = s->number_of_bins;
     int cnt = 0;
+    float sum = 0.0f;
     for (int c = 0; c < k; c++)
     {
         int best = -1;
@@ -305,6 +312,7 @@ static int netid_top_tones(const struct frame_sync *s, int k, int *bins, float *
                     break;
                 }
             }
+            sum += s->fft_mag[i];
             if (!dup && s->fft_mag[i] > m)
             {
                 m = s->fft_mag[i];
@@ -317,6 +325,7 @@ static int netid_top_tones(const struct frame_sync *s, int k, int *bins, float *
         mags[cnt] = s->fft_mag[best];
         cnt++;
     }
+    *mean = sum / (float)n;
     return cnt;
 }
 
@@ -352,25 +361,28 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
     s->netid_dec[0] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[0], s->downchirp);
     int bins0[NETID_JOINT_K], bins1[NETID_JOINT_K];
     float mags0[NETID_JOINT_K], mags1[NETID_JOINT_K];
-    int nb0 = netid_top_tones(s, NETID_JOINT_K, bins0, mags0);
+    float mean0, mean1;
+    int nb0 = netid_top_tones(s, NETID_JOINT_K, bins0, mags0, &mean0);
     s->netid_dec[1] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[n], s->downchirp);
-    int nb1 = netid_top_tones(s, NETID_JOINT_K, bins1, mags1);
+    int nb1 = netid_top_tones(s, NETID_JOINT_K, bins1, mags1, &mean1);
 
     log_debug(
-        "netid spec1: %d (%.0f), %d (%.0f) | spec2: %d (%.0f), %d (%.0f)\n",
+        "netid spec1: %d (%.0f), %d (%.0f), mean %.1f | spec2: %d (%.0f), %d (%.0f), mean %.1f\n",
         bins0[0],
         mags0[0],
         nb0 > 1 ? bins0[1] : -1,
         nb0 > 1 ? mags0[1] : 0.0f,
+        mean0,
         bins1[0],
         mags1[0],
         nb1 > 1 ? bins1[1] : -1,
-        nb1 > 1 ? mags1[1] : 0.0f);
+        nb1 > 1 ? mags1[1] : 0.0f,
+        mean1);
 
     if (s->sync_words[0] != 0 && s->sync_words[1] != 0)
     { /* worded mode: joint pair arbitration, argmax pair as fallback */
-        int best0 = -1, best1 = -1;
-        float best_p = -1.0f;
+        int best0 = -1, best1 = -1, arg0 = -1, arg1 = -1;
+        float best_p = -1.0f, best_m0 = 0.0f, best_m1 = 0.0f;
         for (int i = 0; i < nb0; i++)
             for (int j = 0; j < nb1; j++)
             {
@@ -381,21 +393,37 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
                     (long)n / 4);
                 if (d > (int32_t)n / 8)
                     d -= (int32_t)n / 4;
-                /* runner-ups sit within ~2 dB of the window argmax; blades do not */
+                /* runner-ups sit within ~2 dB of the window argmax; blades do not.
+                 * A substituted member must carry >= 0.65 of the argmax it
+                 * displaces: the joint read's own-id conversions replace a
+                 * noise blade with a comparable or stronger tone (measured
+                 * ratio >= 0.70), while foreign-id fabrications swap the
+                 * true foreign tone for a spacing-consistent blade (measured
+                 * ratio <= 0.61) — a real tone is not given away cheaply. */
                 if (abs(d) <= 2 && mags0[i] > 0.25f * mags0[0] && mags1[j] > 0.25f * mags1[0] &&
-                    mags0[i] + mags1[j] > best_p)
+                    (i == 0 || mags0[i] > 0.65f * mags0[0]) &&
+                    (j == 0 || mags1[j] > 0.65f * mags1[0]) && mags0[i] + mags1[j] > best_p)
                 {
                     best_p = mags0[i] + mags1[j];
                     best0 = bins0[i];
                     best1 = bins1[j];
+                    best_m0 = mags0[i];
+                    best_m1 = mags1[j];
+                    arg0 = i == 0;
+                    arg1 = j == 0;
                 }
             }
         if (best0 >= 0)
         {
             log_debug(
-                "netid joint: read %d,%d (pair-consistent, power %.0f; argmax was %d,%d)\n",
+                "netid joint: read %d,%d mags %.0f,%.0f kept-argmax %d%d "
+                "(pair-consistent, power %.0f; argmax was %d,%d)\n",
                 best0,
                 best1,
+                best_m0,
+                best_m1,
+                arg0,
+                arg1,
                 best_p,
                 s->netid_dec[0],
                 s->netid_dec[1]);

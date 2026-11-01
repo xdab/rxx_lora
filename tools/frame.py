@@ -440,7 +440,7 @@ def main() -> None:
     )
     p.add_argument("--sf", type=int, default=7, help="spreading factor (7..12)")
     p.add_argument("--bw", type=float, default=125e3, help="bandwidth in Hz")
-    p.add_argument("--os", type=int, default=8, help="oversampling (samples/chip)")
+    p.add_argument("--os", type=int, default=2, help="oversampling (samples/chip)")
     p.add_argument("--iq", default="frame.cf32", help="output cf32 file (float32 I/Q)")
     p.add_argument(
         "--plot",
