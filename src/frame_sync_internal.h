@@ -62,6 +62,7 @@ struct sfd_cand
 struct sfd
 {
     float fir[SFD_FIR_TAPS];   // anti-alias FIR before the os-decimation
+    unsigned fir_n;            // taps in fir[] actually in use (per-os design)
     void *slot_fft_cfg;        // 4N-point FFT plan (slot spectra)
     void *lock_fft_cfg;        // coherent-lock FFT plan, lock_len points
     uint32_t lock_len;         // zero-padded lock FFT length (power of two)

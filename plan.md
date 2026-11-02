@@ -160,6 +160,14 @@ Standard, in attack order:
    (the idea-9 instrument, which exists now), NOT just regression —
    the resampler campaign showed the gate alone can bless quality damage.
    Per-os tap counts (taps(os)) keep os=4/8 covered.
+   LANDED 2026-11-02 on this branch: 15-tap kaiser (beta 5.7) half-band,
+   fir_n bounds the MAC loop. capture1: Ir 1,037.9M -> 809.5M (-22%,
+   sfd_slot_dec -58%), wall 104.2 -> 75.5 ms vs fresh main (paired
+   interleaved, -27%). BER sf9/bw250k resampler-in-path: knee unchanged
+   (-17/-16 dB); deep waterfall within trial noise, at -16 dB the
+   half-band decodes cleaner (0 vs 64 bit errs / 64000); 506/13000
+   paired-trial verdict flips (~4%), symmetric. Regression 41/41,
+   regression_perf 27/27.
 
 Braver, only if the above stalls:
 

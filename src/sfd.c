@@ -109,7 +109,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
     {
         int64_t base = off + (int64_t)j * (int64_t)s->oversampling_factor - (int64_t)half;
         float complex acc = 0;
-        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+        for (unsigned t = 0; t < s->sfd.fir_n; t++)
             acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
         dst[j] = acc;
     }
@@ -172,6 +172,18 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
         n);
 }
 
+/* Modified Bessel I0, the kaiser window's denominator. */
+static float sfd_bessel_i0(float x)
+{
+    float sum = 1.0f, term = 1.0f;
+    for (int i = 1; i < 40; i++)
+    {
+        term *= (x / (2.0f * (float)i)) * (x / (2.0f * (float)i));
+        sum += term;
+    }
+    return sum;
+}
+
 int sfd_alloc(struct frame_sync *s)
 {
     struct sfd *f = &s->sfd;
@@ -211,15 +223,39 @@ int sfd_alloc(struct frame_sync *s)
     // firwin(65, 1/os, hamming)-class design; the passband must cover the
     // whole chirp band — tone bins in (-N/2, N/2], up to the decimated
     // Nyquist. Unity DC gain: h = c*sinc(c*(t - center)) windowed, normalized.
+    // os == 2 gets a 15-tap half-band instead (h = 0.5*sinc((t-m)/2),
+    // kaiser beta 5.7 ~ 60 dB, zeros at every other tap): the same cutoff,
+    // one quarter the taps.
     float c = 1.0f / (float)s->oversampling_factor;
     float sum = 0.0f;
-    for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+    memset(f->fir, 0, sizeof(f->fir));
+    if (s->oversampling_factor == 2)
     {
-        float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
-        float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-        float w = 0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
-        f->fir[t] = c * sinc * w;
-        sum += f->fir[t];
+        const unsigned nt = 15, mid = nt / 2;
+        f->fir_n = nt;
+        const float beta = 5.7f, i0b = sfd_bessel_i0(beta);
+        for (unsigned t = 0; t < nt; t++)
+        {
+            float x = 0.5f * (float)((int)t - (int)mid);
+            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
+            float w = sfd_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
+            f->fir[t] = 0.5f * sinc * w;
+            sum += f->fir[t];
+        }
+    }
+    else
+    {
+        f->fir_n = SFD_FIR_TAPS;
+        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+        {
+            float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
+            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+            float w =
+                0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
+            f->fir[t] = c * sinc * w;
+            sum += f->fir[t];
+        }
     }
     for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
         f->fir[t] /= sum;
