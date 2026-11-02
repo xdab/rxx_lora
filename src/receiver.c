@@ -247,17 +247,17 @@ static int chase_retry(
         if (suspects[i].marg <= CHASE_MARG * suspects[i].norm)
             sel[n_sel++] = i;
 
-    // singles, selection order
+    // singles, arbitrated by loss like the pairs: sel's CRC tail is unsorted
     for (s = 0; s < n_sel; s++)
     {
+        float loss = suspects[sel[s]].marg;
         memcpy(tmp, nibs, nnib);
         tmp[sel[s]] = suspects[sel[s]].alt;
-        if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK)
+        if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
         {
             found = 1;
-            best_loss = suspects[sel[s]].marg;
+            best_loss = loss;
             best_res = res;
-            break;
         }
     }
 

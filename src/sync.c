@@ -293,7 +293,12 @@ static int netid_top_tones(
 {
     const uint32_t n = s->number_of_bins;
     int cnt = 0;
+
     float sum = 0.0f;
+    for (uint32_t i = 0; i < n; i++)
+        sum += s->fft_mag[i];
+    *mean = sum / (float)n;
+
     for (int c = 0; c < k; c++)
     {
         int best = -1;
@@ -312,7 +317,6 @@ static int netid_top_tones(
                     break;
                 }
             }
-            sum += s->fft_mag[i];
             if (!dup && s->fft_mag[i] > m)
             {
                 m = s->fft_mag[i];
@@ -325,7 +329,6 @@ static int netid_top_tones(
         mags[cnt] = s->fft_mag[best];
         cnt++;
     }
-    *mean = sum / (float)n;
     return cnt;
 }
 

@@ -43,7 +43,7 @@
 #define SFD_MAX_CANDIDATES (SFD_MAX_TAU_REPS * (SFD_SHIFT_MAX - SFD_SHIFT_MIN + 1))
 
 // coherent-group FFT length: 4x padding of the longest group (4 slots)
-#define SFD_COH_LEN (16u) // x N, set at alloc time
+#define SFD_COH_LEN (16u) // group length in N slots; N is runtime (alloc time)
 
 // the fine D group's scan half-window around u_r, bins: on the re-timed grid
 // the downchirp tone sits slightly off u_r, so the test scans for it
@@ -104,12 +104,12 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
         return;
     }
 
-    const unsigned half = SFD_FIR_TAPS / 2;
+    const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
     for (uint32_t j = 0; j < n; j++)
     {
         int64_t base = off + (int64_t)j * (int64_t)s->oversampling_factor - (int64_t)half;
         float complex acc = 0;
-        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+        for (unsigned t = 0; t < s->sfd.fir_n; t++)
             acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
         dst[j] = acc;
     }
@@ -133,18 +133,6 @@ static void sfd_slot_ref_fft(
     dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < n4; i++)
         mag[i] = s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
-}
-
-/* Power spectrum of the slot at `off`: decimate, then sfd_slot_ref_fft(). */
-static void sfd_slot_mag(
-    struct frame_sync *s,
-    const float complex *in,
-    int64_t off,
-    const float complex *ref,
-    float *mag)
-{
-    sfd_slot_dec(s, in, off, s->sfd.slot);
-    sfd_slot_ref_fft(s, s->sfd.slot, ref, mag);
 }
 
 /* Coherent lock over `count` consecutive slots from `off`: dechirp each,
@@ -184,6 +172,18 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
         n);
 }
 
+/* Modified Bessel I0, the kaiser window's denominator. */
+static float sfd_bessel_i0(float x)
+{
+    float sum = 1.0f, term = 1.0f;
+    for (int i = 1; i < 40; i++)
+    {
+        term *= (x / (2.0f * (float)i)) * (x / (2.0f * (float)i));
+        sum += term;
+    }
+    return sum;
+}
+
 int sfd_alloc(struct frame_sync *s)
 {
     struct sfd *f = &s->sfd;
@@ -199,6 +199,7 @@ int sfd_alloc(struct frame_sync *s)
     f->lockmag = malloc(f->lock_len * sizeof(*f->lockmag));
     f->mag = malloc(4 * (size_t)n * sizeof(*f->mag));
     f->dpair = malloc((size_t)SFD_DPAIR * 4 * n * sizeof(*f->dpair));
+    f->coarse_dec = malloc((size_t)SFD_U_SLOTS * n * sizeof(*f->coarse_dec));
     f->dsum = malloc(4 * (size_t)n * sizeof(*f->dsum));
     f->med = malloc(4 * (size_t)n * sizeof(*f->med));
     f->fine_dec = malloc((size_t)SFD_FINE_DEC * n * sizeof(*f->fine_dec));
@@ -211,9 +212,9 @@ int sfd_alloc(struct frame_sync *s)
     f->slot_fft_cfg = dsp_fft_alloc(4 * (int)n);
     f->lock_fft_cfg = dsp_fft_alloc((int)f->lock_len);
     f->coh_fft_cfg = dsp_fft_alloc((int)(SFD_COH_LEN * n));
-    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->dsum || !f->med || !f->fine_dec ||
-        !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in || !f->coh_out ||
-        !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
+    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->coarse_dec || !f->dsum || !f->med ||
+        !f->fine_dec || !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in ||
+        !f->coh_out || !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
     {
         sfd_free(s);
         return -1;
@@ -222,15 +223,38 @@ int sfd_alloc(struct frame_sync *s)
     // firwin(65, 1/os, hamming)-class design; the passband must cover the
     // whole chirp band — tone bins in (-N/2, N/2], up to the decimated
     // Nyquist. Unity DC gain: h = c*sinc(c*(t - center)) windowed, normalized.
+    // os == 2 instead gets a 15-tap half-band (h = 0.5*sinc((t-m)/2),
+    // kaiser beta 5.7 ~ 60 dB): same cutoff, zeros at every other tap.
     float c = 1.0f / (float)s->oversampling_factor;
     float sum = 0.0f;
-    for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+    memset(f->fir, 0, sizeof(f->fir));
+    if (s->oversampling_factor == 2)
     {
-        float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
-        float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-        float w = 0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
-        f->fir[t] = c * sinc * w;
-        sum += f->fir[t];
+        const unsigned nt = 15, mid = nt / 2;
+        f->fir_n = nt;
+        const float beta = 5.7f, i0b = sfd_bessel_i0(beta);
+        for (unsigned t = 0; t < nt; t++)
+        {
+            float x = 0.5f * (float)((int)t - (int)mid);
+            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
+            float w = sfd_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
+            f->fir[t] = 0.5f * sinc * w;
+            sum += f->fir[t];
+        }
+    }
+    else
+    {
+        f->fir_n = SFD_FIR_TAPS;
+        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
+        {
+            float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
+            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+            float w =
+                0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
+            f->fir[t] = c * sinc * w;
+            sum += f->fir[t];
+        }
     }
     for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
         f->fir[t] /= sum;
@@ -245,6 +269,7 @@ void sfd_free(struct frame_sync *s)
     free(f->lockmag);
     free(f->mag);
     free(f->dpair);
+    free(f->coarse_dec);
     free(f->dsum);
     free(f->med);
     free(f->fine_dec);
@@ -372,14 +397,14 @@ float sfd_shift_lam(
                 1.0f;
     float net = 0.0f;
     if (sync_words[0] != 0)
-    { // the pair at f + w0 / f + w1: positive net-id evidence
+    { // the pair at f + w0 / f + w1: positive net-id evidence, both into net
         net += sfd_bin_pow(
                    s->sfd.fine_dn + (size_t)(shift - 2 + 9) * 4 * n,
                    n,
                    util_modf(u_r + (float)sync_words[0], n)) /
                    sigma2 -
                1.0f;
-        lam += sfd_bin_pow(
+        net += sfd_bin_pow(
                    s->sfd.fine_dn + (size_t)(shift - 1 + 9) * 4 * n,
                    n,
                    util_modf(u_r + (float)sync_words[1], n)) /
@@ -433,17 +458,24 @@ static int sfd_coarse(
      * known-bin power at u, plus the candidate's two windows dechirped by
      * the upchirp (downchirp evidence). */
     float upow[SFD_U_SLOTS]; // slot offsets -4..9, index o + 4
+    // decimate the covered offsets once; the down-ref rows (upow) and the
+    // pair slots' up-ref rows (dpair) share the decimations
+    for (int o = -4; o <= 9; o++)
+        sfd_slot_dec(s, in, (int64_t)o * sps, s->sfd.coarse_dec + (size_t)(o + 4) * n);
     for (int o = -4; o <= 9; o++)
     {
-        sfd_slot_mag(s, in, (int64_t)o * sps, s->downchirp, s->sfd.mag);
+        sfd_slot_ref_fft(s, s->sfd.coarse_dec + (size_t)(o + 4) * n, s->downchirp, s->sfd.mag);
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
     }
 
     /* Pair-slot spectra computed once: each interior slot feeds two q
      * hypotheses (as q of one and q+1 of the previous). */
     for (int sl = 0; sl < SFD_DPAIR; sl++)
-        sfd_slot_mag(
-            s, in, (int64_t)(SFD_Q_MIN + sl) * sps, s->upchirp, s->sfd.dpair + (size_t)sl * n4);
+        sfd_slot_ref_fft(
+            s,
+            s->sfd.coarse_dec + (size_t)(SFD_Q_MIN + sl + 4) * n,
+            s->upchirp,
+            s->sfd.dpair + (size_t)sl * n4);
 
     float best_score = -HUGE_VALF;
     *q_hat = SFD_Q_MIN;
