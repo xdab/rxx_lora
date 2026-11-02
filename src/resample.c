@@ -36,9 +36,8 @@ enum
     RESAMP_INTERP,   // regular interpolation
 };
 
-/* Fixed-8-tap kernels: the constant bound fully unrolls, so the ring wrap
- * becomes mask arithmetic and the accumulator stays in registers. Selected
- * once at create; the generic loops below cover every other h_sub. */
+/* Fixed-8-tap kernels: constant bound, no wrap branch; selected once at
+ * create, the generic loops below cover every other h_sub. */
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;

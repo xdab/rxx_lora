@@ -223,9 +223,8 @@ int sfd_alloc(struct frame_sync *s)
     // firwin(65, 1/os, hamming)-class design; the passband must cover the
     // whole chirp band — tone bins in (-N/2, N/2], up to the decimated
     // Nyquist. Unity DC gain: h = c*sinc(c*(t - center)) windowed, normalized.
-    // os == 2 gets a 15-tap half-band instead (h = 0.5*sinc((t-m)/2),
-    // kaiser beta 5.7 ~ 60 dB, zeros at every other tap): the same cutoff,
-    // one quarter the taps.
+    // os == 2 instead gets a 15-tap half-band (h = 0.5*sinc((t-m)/2),
+    // kaiser beta 5.7 ~ 60 dB): same cutoff, zeros at every other tap.
     float c = 1.0f / (float)s->oversampling_factor;
     float sum = 0.0f;
     memset(f->fir, 0, sizeof(f->fir));

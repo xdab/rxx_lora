@@ -247,9 +247,7 @@ static int chase_retry(
         if (suspects[i].marg <= CHASE_MARG * suspects[i].norm)
             sel[n_sel++] = i;
 
-    // singles, arbitrated by loss like the pairs: sel's payload prefix is
-    // margin-sorted but the appended CRC nibbles are not, so the first
-    // CRC-OK single need not be the cheapest
+    // singles, arbitrated by loss like the pairs: sel's CRC tail is unsorted
     for (s = 0; s < n_sel; s++)
     {
         float loss = suspects[sel[s]].marg;
