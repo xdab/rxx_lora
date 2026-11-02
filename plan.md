@@ -70,7 +70,11 @@ paired-interleaved wall on capture1 against a fresh-main worktree.
    event): 8 taps x 8B complex = 64B of ring reads per output is a cache
    line per output; if stall-bound, the levers are data layout (SoA,
    ring locality) not instruction count. Cheap, prevents building the
-   wrong thing.
+   wrong thing. MEASURED 2026-11-02: cachegrind (perf not installed) -
+   LL misses ~0 program-wide, resampler D1 miss rate trivial (458k of
+   4.5M). NOT memory-bound: instruction count is the lever, which picks
+   5 over 6. (Hardware-only effects - branch mispredicts, uop limits -
+   remain invisible to this instrument.)
 
 ## Ideas — brave
 
