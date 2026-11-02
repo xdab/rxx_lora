@@ -60,6 +60,11 @@ paired-interleaved wall on capture1 against a fresh-main worktree.
    quantized) -> quality-gated; capture1's ratio is rational (125/256),
    so on the bench a 256-phase table is EXACT - the sweep decides what
    the irrational real-world cases tolerate. Watch table size vs cache.
+   MEASURED 2026-11-02 (after 1+2 landed), REJECTED: 64-phase table,
+   Ir 738.8M -> 711.1M (-3.8%) but wall FLAT (73.0 vs 72.9 ms paired);
+   after the idea-2 unroll the interpolation is 8 scalar FMAs on
+   registers, and the table swap trades them for a quantize + a second
+   128KB working set. Not worth the code path at zero wall gain.
 4. **Cycles, not instructions, steer round two.** Before any big
    rewrite, re-profile wall attribution (perf stat / callgrind cycles
    event): 8 taps x 8B complex = 64B of ring reads per output is a cache
