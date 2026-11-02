@@ -25,7 +25,8 @@ struct resampler
     float complex (*f_mix)(const struct resampler *, int, float); // h_sub-specialized
     float complex y0, y1; // branch outputs bracketing the current phase
     size_t delay;         // leading output samples dropped (the group delay)
-    size_t drained;       // output samples emitted so far, delay included
+    size_t drained;       // leading outputs seen; only read during the
+                          // group-delay drop, frozen once it drains
     float complex *block; // one input sample's outputs
 };
 
@@ -37,17 +38,18 @@ enum
 
 /* Fixed-8-tap kernels: the constant bound fully unrolls, so the ring wrap
  * becomes mask arithmetic and the accumulator stays in registers. Selected
- * once at create; the generic loops above cover every other h_sub. */
+ * once at create; the generic loops below cover every other h_sub. */
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;
     unsigned p = rs->w_pos;
     float complex acc = 0;
     for (unsigned k = 0; k < 8; k++)
-        acc += h[k] * rs->w[(p + k) & 7];
+        acc += h[k] * rs->w[(p + k) & (rs->h_sub - 1)];
     return acc;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (branch, mix) distinct types at call sites
 static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
 {
     const float *h0 = rs->coef + (size_t)i * 8;
@@ -57,7 +59,7 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
     for (unsigned k = 0; k < 8; k++)
     {
         float h = h0[k] + mu * (h1[k] - h0[k]);
-        acc += h * rs->w[(p + k) & 7];
+        acc += h * rs->w[(p + k) & (rs->h_sub - 1)];
     }
     return acc;
 }

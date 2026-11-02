@@ -104,7 +104,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
         return;
     }
 
-    const unsigned half = SFD_FIR_TAPS / 2;
+    const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
     for (uint32_t j = 0; j < n; j++)
     {
         int64_t base = off + (int64_t)j * (int64_t)s->oversampling_factor - (int64_t)half;
