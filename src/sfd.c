@@ -135,18 +135,6 @@ static void sfd_slot_ref_fft(
         mag[i] = s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
 }
 
-/* Power spectrum of the slot at `off`: decimate, then sfd_slot_ref_fft(). */
-static void sfd_slot_mag(
-    struct frame_sync *s,
-    const float complex *in,
-    int64_t off,
-    const float complex *ref,
-    float *mag)
-{
-    sfd_slot_dec(s, in, off, s->sfd.slot);
-    sfd_slot_ref_fft(s, s->sfd.slot, ref, mag);
-}
-
 /* Coherent lock over `count` consecutive slots from `off`: dechirp each,
  * concatenate (the tone is phase-continuous across symbols), zero-pad,
  * fractional peak. Returns u = f + tau, in symbol bins. */
@@ -199,6 +187,7 @@ int sfd_alloc(struct frame_sync *s)
     f->lockmag = malloc(f->lock_len * sizeof(*f->lockmag));
     f->mag = malloc(4 * (size_t)n * sizeof(*f->mag));
     f->dpair = malloc((size_t)SFD_DPAIR * 4 * n * sizeof(*f->dpair));
+    f->coarse_dec = malloc((size_t)SFD_U_SLOTS * n * sizeof(*f->coarse_dec));
     f->dsum = malloc(4 * (size_t)n * sizeof(*f->dsum));
     f->med = malloc(4 * (size_t)n * sizeof(*f->med));
     f->fine_dec = malloc((size_t)SFD_FINE_DEC * n * sizeof(*f->fine_dec));
@@ -211,9 +200,9 @@ int sfd_alloc(struct frame_sync *s)
     f->slot_fft_cfg = dsp_fft_alloc(4 * (int)n);
     f->lock_fft_cfg = dsp_fft_alloc((int)f->lock_len);
     f->coh_fft_cfg = dsp_fft_alloc((int)(SFD_COH_LEN * n));
-    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->dsum || !f->med || !f->fine_dec ||
-        !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in || !f->coh_out ||
-        !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
+    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->coarse_dec || !f->dsum || !f->med ||
+        !f->fine_dec || !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in ||
+        !f->coh_out || !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
     {
         sfd_free(s);
         return -1;
@@ -245,6 +234,7 @@ void sfd_free(struct frame_sync *s)
     free(f->lockmag);
     free(f->mag);
     free(f->dpair);
+    free(f->coarse_dec);
     free(f->dsum);
     free(f->med);
     free(f->fine_dec);
@@ -433,17 +423,24 @@ static int sfd_coarse(
      * known-bin power at u, plus the candidate's two windows dechirped by
      * the upchirp (downchirp evidence). */
     float upow[SFD_U_SLOTS]; // slot offsets -4..9, index o + 4
+    // decimate the covered offsets once; the down-ref rows (upow) and the
+    // pair slots' up-ref rows (dpair) share the decimations
+    for (int o = -4; o <= 9; o++)
+        sfd_slot_dec(s, in, (int64_t)o * sps, s->sfd.coarse_dec + (size_t)(o + 4) * n);
     for (int o = -4; o <= 9; o++)
     {
-        sfd_slot_mag(s, in, (int64_t)o * sps, s->downchirp, s->sfd.mag);
+        sfd_slot_ref_fft(s, s->sfd.coarse_dec + (size_t)(o + 4) * n, s->downchirp, s->sfd.mag);
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
     }
 
     /* Pair-slot spectra computed once: each interior slot feeds two q
      * hypotheses (as q of one and q+1 of the previous). */
     for (int sl = 0; sl < SFD_DPAIR; sl++)
-        sfd_slot_mag(
-            s, in, (int64_t)(SFD_Q_MIN + sl) * sps, s->upchirp, s->sfd.dpair + (size_t)sl * n4);
+        sfd_slot_ref_fft(
+            s,
+            s->sfd.coarse_dec + (size_t)(SFD_Q_MIN + sl + 4) * n,
+            s->upchirp,
+            s->sfd.dpair + (size_t)sl * n4);
 
     float best_score = -HUGE_VALF;
     *q_hat = SFD_Q_MIN;

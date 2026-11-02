@@ -61,24 +61,25 @@ struct sfd_cand
 /** SFD-first coarse sync (src/sfd.c): the slot pipeline's plans and scratch. */
 struct sfd
 {
-    float fir[SFD_FIR_TAPS]; // anti-alias FIR before the os-decimation
-    void *slot_fft_cfg;      // 4N-point FFT plan (slot spectra)
-    void *lock_fft_cfg;      // coherent-lock FFT plan, lock_len points
-    uint32_t lock_len;       // zero-padded lock FFT length (power of two)
-    dsp_cpx *cx_in;          // FFT input scratch shared by both plans
-    dsp_cpx *cx_out;         // FFT output scratch shared by both plans
-    float complex *slot;     // one decimated slot (N)
-    float *lockmag;          // lock power spectrum (lock_len)
-    float *mag;              // one slot power spectrum (4N)
-    float *dpair;            // change-point pair-slot power spectra (SFD_DPAIR x 4N)
-    float *dsum;             // power sum over the D pair (4N)
-    float *med;              // median scratch (4N)
-    float complex *fine_dec; // fine-pass decimated slots (SFD_FINE_DEC x N)
-    float *fine_dn;          // fine-pass down-ref power spectra (SFD_FINE_DN x 4N)
-    float *fine_up;          // fine-pass sigma2 slot power spectrum (SFD_FINE_UP x 4N)
-    void *coh_fft_cfg;       // coherent-group FFT plan, 16N points
-    dsp_cpx *coh_in;         // coherent-group input scratch (4N)
-    dsp_cpx *coh_out;        // coherent-group output scratch (16N)
+    float fir[SFD_FIR_TAPS];   // anti-alias FIR before the os-decimation
+    void *slot_fft_cfg;        // 4N-point FFT plan (slot spectra)
+    void *lock_fft_cfg;        // coherent-lock FFT plan, lock_len points
+    uint32_t lock_len;         // zero-padded lock FFT length (power of two)
+    dsp_cpx *cx_in;            // FFT input scratch shared by both plans
+    dsp_cpx *cx_out;           // FFT output scratch shared by both plans
+    float complex *slot;       // one decimated slot (N)
+    float *lockmag;            // lock power spectrum (lock_len)
+    float *mag;                // one slot power spectrum (4N)
+    float *dpair;              // change-point pair-slot power spectra (SFD_DPAIR x 4N)
+    float complex *coarse_dec; // coarse-pass decimated slots (SFD_U_SLOTS x N)
+    float *dsum;               // power sum over the D pair (4N)
+    float *med;                // median scratch (4N)
+    float complex *fine_dec;   // fine-pass decimated slots (SFD_FINE_DEC x N)
+    float *fine_dn;            // fine-pass down-ref power spectra (SFD_FINE_DN x 4N)
+    float *fine_up;            // fine-pass sigma2 slot power spectrum (SFD_FINE_UP x 4N)
+    void *coh_fft_cfg;         // coherent-group FFT plan, 16N points
+    dsp_cpx *coh_in;           // coherent-group input scratch (4N)
+    dsp_cpx *coh_out;          // coherent-group output scratch (16N)
 };
 
 /** SFD-first coarse-sync outcome (src/sfd.c): the frame-grid decision at the

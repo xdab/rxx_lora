@@ -123,7 +123,14 @@ Standard, in attack order:
 1. **Tap-range clamp, no per-tap branch.** For each j the in-retention
    taps are t in [max(0, back-base), min(65, fwd-base)); out-of-range
    taps contribute fir[t]*0 = 0, so they can be SKIPPED, not zero-padded.
-   Two clamps per output replace 65 checks. Bit-exact.
+   Two clamps per output replace 65 checks. Bit-exact. MEASURED
+   2026-11-02, REJECTED: total Ir −7.1% (1,073.1M → 996.8M) as predicted,
+   but capture1 wall clock +20% (95-98 → 114-119 ms, paired interleaved
+   vs fresh main) — gcc auto-vectorized the new contiguous MAC (273 ymm
+   ops in sfd_slot_dec, vs a scalar baseline) and the complex-interleave
+   shuffles dominate; and `no-tree-vectorize` was not re-tried before the
+   idea was dropped. Ir is not wall: the 105.6M check was cheap
+   predictable branches.
 2. **Fully-interior fast path.** When [base, base+64) fits the retention
    (the common case — slots sit well inside the (2*SYNC_LOOKAHEAD+1)*sps
    window), one compare per j selects a straight contiguous MAC with zero
@@ -141,7 +148,10 @@ Standard, in attack order:
    8 slots decimated twice per coarse run, although patch 07 made
    decimation ref-independent. Decimate -4..9 once (14 decs), derive both
    the down-ref (upow) and up-ref (dpair) FFT rows from the shared rows.
-   Saves 8 of 22 coarse decimations, bit-exact.
+   Saves 8 of 22 coarse decimations, bit-exact. LANDED 2026-11-02 on this
+   branch: Ir 1,073.1M → 1,037.9M (−3.3%, sfd_slot_dec self −13%),
+   capture1 wall ~95 vs ~99-101 ms baseline (paired interleaved);
+   regression 41/41, regression_perf 27/27.
 5. **Half-band redesign for os=2.** SFD_FIR_TAPS=65 is a windowed sinc
    for arbitrary os; a 2:1 half-band at 60 dB needs ~15 taps and has
    zeros at every other tap (2x fewer mults on top). 65 -> 15 is ~4x on
