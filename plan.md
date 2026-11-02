@@ -90,6 +90,26 @@ paired-interleaved wall on capture1 against a fresh-main worktree.
    wins; at 8 taps it cannot. Listed to record why it is rejected
    without a run: the filter is short, the win regime is >=32 taps.
 
+## To-explore, not to-do (external feedback, proof-read, unverified here)
+
+Side channel raised after the sfd half-band landed. The half-band
+sparsity is intrinsically a divide-by-2 phenomenon (sinc(n/2) zeros at
+every even offset); at c=1/M only ~1/M of taps vanish, so os=3/5 have no
+structural shortcut, and os=4 cascades two half-bands. Items, none
+measurement-backed in this repo yet:
+
+- **Equiripple (Parks-McClellan) redesign of the generic 65-tap path**
+  (~2x fewer taps at the same specs, standard SDR practice). Caveat: the
+  generic path serves os=4/8 only - capture1 and the perf gate run os=2,
+  so the win is invisible to the current bench; an os=4 bench case would
+  have to exist first.
+- **Equiripple half-band at the same length (15 taps).** Same speed,
+  more stopband - OTA robustness margin against out-of-band
+  interferers, not a perf item. AWGN sweeps cannot see the difference;
+  only real captures could.
+- Numeric nit worth keeping: at N=15 the half-band has 9 non-zero taps
+  (odd offsets +-1,3,5,7 plus center), not "half".
+
 ## Plan of record
 
 1 -> 2 (one bit-exact commit each, wall-gated), then 3 (quality-gated),
