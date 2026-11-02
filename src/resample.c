@@ -265,13 +265,21 @@ size_t resampler_push(
     {
         unsigned nw = execute(rs, in[i], rs->block);
 
-        for (unsigned k = 0; k < nw; k++)
-        {
-            if (rs->drained++ < rs->delay) // drop the group delay once
-                continue;
-
-            if (n < out_cap) // the caller sizes out via resampler_push_space
-                out[n++] = rs->block[k];
+        if (rs->drained >= rs->delay)
+        { // steady state: no per-output bookkeeping
+            for (unsigned k = 0; k < nw; k++)
+                if (n < out_cap) // the caller sizes out via resampler_push_space
+                    out[n++] = rs->block[k];
+        }
+        else
+        { // leading group delay, dropped once
+            for (unsigned k = 0; k < nw; k++)
+            {
+                if (rs->drained++ < rs->delay)
+                    continue;
+                if (n < out_cap)
+                    out[n++] = rs->block[k];
+            }
         }
     }
 
