@@ -8,19 +8,21 @@
 
 struct resampler
 {
-    unsigned m;           // prototype semi-length: taps per branch = 2m
-    unsigned npfb;        // number of polyphase branches
-    unsigned h_sub;       // taps per branch = 2m
-    float *coef;          // npfb*h_sub branch taps, row i oldest-tap-first
-    float complex *w;     // circular delay line, h_sub slots
-    unsigned w_pos;       // delay-line write position; slot w_pos is the oldest
-    float rate;           // output/input sample rate
-    float del;            // timing step per output = 1/rate
-    float tau;            // accumulated timing phase
-    float bf;             // soft branch index = tau*npfb
-    int b;                // base branch index floor(bf)
-    float mu;             // fractional branch index bf-b
-    int state;            // RESAMP_BOUNDARY or RESAMP_INTERP
+    unsigned m;       // prototype semi-length: taps per branch = 2m
+    unsigned npfb;    // number of polyphase branches
+    unsigned h_sub;   // taps per branch = 2m
+    float *coef;      // npfb*h_sub branch taps, row i oldest-tap-first
+    float complex *w; // circular delay line, h_sub slots
+    unsigned w_pos;   // delay-line write position; slot w_pos is the oldest
+    float rate;       // output/input sample rate
+    float del;        // timing step per output = 1/rate
+    float tau;        // accumulated timing phase
+    float bf;         // soft branch index = tau*npfb
+    int b;            // base branch index floor(bf)
+    float mu;         // fractional branch index bf-b
+    int state;        // RESAMP_BOUNDARY or RESAMP_INTERP
+    float complex (*f_out)(const struct resampler *, int);        // branch kernel pair,
+    float complex (*f_mix)(const struct resampler *, int, float); // h_sub-specialized
     float complex y0, y1; // branch outputs bracketing the current phase
     size_t delay;         // leading output samples dropped (the group delay)
     size_t drained;       // output samples emitted so far, delay included
@@ -32,6 +34,33 @@ enum
     RESAMP_BOUNDARY, // boundary between input samples
     RESAMP_INTERP,   // regular interpolation
 };
+
+/* Fixed-8-tap kernels: the constant bound fully unrolls, so the ring wrap
+ * becomes mask arithmetic and the accumulator stays in registers. Selected
+ * once at create; the generic loops above cover every other h_sub. */
+static float complex branch_out_8(const struct resampler *rs, int i)
+{
+    const float *h = rs->coef + (size_t)i * 8;
+    unsigned p = rs->w_pos;
+    float complex acc = 0;
+    for (unsigned k = 0; k < 8; k++)
+        acc += h[k] * rs->w[(p + k) & 7];
+    return acc;
+}
+
+static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
+{
+    const float *h0 = rs->coef + (size_t)i * 8;
+    const float *h1 = h0 + 8;
+    unsigned p = rs->w_pos;
+    float complex acc = 0;
+    for (unsigned k = 0; k < 8; k++)
+    {
+        float h = h0[k] + mu * (h1[k] - h0[k]);
+        acc += h * rs->w[(p + k) & 7];
+    }
+    return acc;
+}
 
 // One polyphase branch: FIR of the decimated prototype against the delay line
 static float complex branch_out(const struct resampler *rs, int i)
@@ -101,7 +130,7 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     {
         if (rs->state == RESAMP_BOUNDARY)
         {
-            rs->y1 = branch_out(rs, 0);
+            rs->y1 = rs->f_out(rs, 0);
             y[n++] = (1.0f - rs->mu) * rs->y0 + rs->mu * rs->y1;
             update_timing(rs);
             rs->state = RESAMP_INTERP;
@@ -111,13 +140,13 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
             if (rs->b == (int)rs->npfb - 1)
             {
                 // last branch: the next sample must arrive to interpolate
-                rs->y0 = branch_out(rs, rs->b);
+                rs->y0 = rs->f_out(rs, rs->b);
                 rs->state = RESAMP_BOUNDARY;
                 rs->b = (int)rs->npfb;
             }
             else
             {
-                y[n++] = branch_mix(rs, rs->b, rs->mu);
+                y[n++] = rs->f_mix(rs, rs->b, rs->mu);
                 update_timing(rs);
             }
         }
@@ -194,6 +223,16 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     rs->rate = rate;
     rs->del = 1.0f / rate;
     rs->state = RESAMP_INTERP; // start mid-bank, like a fresh arbitrary resampler
+    if (rs->h_sub == 8)
+    {
+        rs->f_out = branch_out_8;
+        rs->f_mix = branch_mix_8;
+    }
+    else
+    {
+        rs->f_out = branch_out;
+        rs->f_mix = branch_mix;
+    }
 
     unsigned n = 2 * m * npfb + 1;
     float *hf = malloc(n * sizeof(*hf));
