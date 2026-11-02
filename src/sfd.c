@@ -43,7 +43,7 @@
 #define SFD_MAX_CANDIDATES (SFD_MAX_TAU_REPS * (SFD_SHIFT_MAX - SFD_SHIFT_MIN + 1))
 
 // coherent-group FFT length: 4x padding of the longest group (4 slots)
-#define SFD_COH_LEN (16u) // x N, set at alloc time
+#define SFD_COH_LEN (16u) // group length in N slots; N is runtime (alloc time)
 
 // the fine D group's scan half-window around u_r, bins: on the re-timed grid
 // the downchirp tone sits slightly off u_r, so the test scans for it
@@ -398,14 +398,14 @@ float sfd_shift_lam(
                 1.0f;
     float net = 0.0f;
     if (sync_words[0] != 0)
-    { // the pair at f + w0 / f + w1: positive net-id evidence
+    { // the pair at f + w0 / f + w1: positive net-id evidence, both into net
         net += sfd_bin_pow(
                    s->sfd.fine_dn + (size_t)(shift - 2 + 9) * 4 * n,
                    n,
                    util_modf(u_r + (float)sync_words[0], n)) /
                    sigma2 -
                1.0f;
-        lam += sfd_bin_pow(
+        net += sfd_bin_pow(
                    s->sfd.fine_dn + (size_t)(shift - 1 + 9) * 4 * n,
                    n,
                    util_modf(u_r + (float)sync_words[1], n)) /

@@ -28,5 +28,5 @@ with `--help` (module docstring plus argparse).
 | `regression.py` | → PASS/FAIL matrix | The commit gate: C-binary end-to-end decodes plus the real `data/capture*` frames in three netid arms. SKIPs (never FAILs) on a missing dep or unfetched LFS pointer |
 | `regression_perf.py` | → RTx matrix | The gate's speed twin: same verdicts plus the real-time multiplier per line. Verdicts gate the exit code, never the speed |
 
-Shared CLI defaults: `--sf 7` (7–12), `--bw 125000`, `--os 8` samples/chip.
+Shared CLI defaults: `--sf 7` (7–12), `--bw 125000`, `--os 2` samples/chip.
 IQ files are **cf32**: raw interleaved float32 I/Q, ±1.0, no header or padding.
