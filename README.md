@@ -91,8 +91,6 @@ For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.
 | ----------------------------------------------------------------- |
 | <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="600"/> |
 
-Information regarding the used theoretical curves can be found under [docs/ber-theory](docs/ber-theory.md).
-
 ## Credits
 
 ### Receive chain
