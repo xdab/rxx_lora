@@ -1,6 +1,7 @@
 #include <complex.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "dsp.h"
 #include "logging.h"
@@ -8,21 +9,22 @@
 
 struct resampler
 {
-    unsigned m;       // prototype semi-length: taps per branch = 2m
-    unsigned npfb;    // number of polyphase branches
-    unsigned h_sub;   // taps per branch = 2m
-    float *coef;      // npfb*h_sub branch taps, row i oldest-tap-first
-    float complex *w; // circular delay line, mirrored to 2*h_sub slots: every
-                      // push writes both w[pos] and w[pos+h_sub], so a window
-                      // (w_pos .. w_pos+h_sub) never wraps and reads linearly
-    unsigned w_pos;   // delay-line write position; slot w_pos is the oldest
-    float rate;       // output/input sample rate
-    float del;        // timing step per output = 1/rate
-    float tau;        // accumulated timing phase
-    float bf;         // soft branch index = tau*npfb
-    int b;            // base branch index floor(bf)
-    float mu;         // fractional branch index bf-b
-    int state;        // RESAMP_BOUNDARY or RESAMP_INTERP
+    unsigned m;         // prototype semi-length: taps per branch = 2m
+    unsigned npfb;      // number of polyphase branches
+    unsigned h_sub;     // taps per branch = 2m
+    float *coef;        // npfb*h_sub branch taps, row i oldest-tap-first
+    float *w_re, *w_im; // circular delay line, split real/imag, mirrored to
+                        // 2*h_sub slots each: every push writes both [pos] and
+                        // [pos+h_sub], so a window (w_pos .. +h_sub) never wraps
+                        // and the 8-tap kernel loads it as two whole vectors
+    unsigned w_pos;     // delay-line write position; slot w_pos is the oldest
+    float rate;         // output/input sample rate
+    float del;          // timing step per output = 1/rate
+    float tau;          // accumulated timing phase
+    float bf;           // soft branch index = tau*npfb
+    int b;              // base branch index floor(bf)
+    float mu;           // fractional branch index bf-b
+    int state;          // RESAMP_BOUNDARY or RESAMP_INTERP
     float complex (*f_out)(const struct resampler *, int);        // branch kernel pair,
     float complex (*f_mix)(const struct resampler *, int, float); // h_sub-specialized
     float complex y0, y1; // branch outputs bracketing the current phase
@@ -44,39 +46,55 @@ enum
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;
-    const float complex *x = rs->w + rs->w_pos;
-    float complex acc = 0;
+    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
+    float ar = 0, ai = 0;
     for (unsigned k = 0; k < 8; k++)
-        acc += h[k] * x[k];
-    return acc;
+    {
+        ar += h[k] * xr[k];
+        ai += h[k] * xi[k];
+    }
+    return ar + ai * I;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (branch, mix) distinct types at call sites
 static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
 {
+    /* The whole 8-tap dot in four vector ops: interpolate the taps as one
+     * vector, multiply into the split delay-line windows, then two explicit
+     * horizontal sums. The manual form sidesteps the FP-reassociation barrier
+     * that keeps gcc from vectorizing the scalar loop; the summation order is
+     * fixed by the horizontal tree, not left to the compiler. */
+    typedef float v8 __attribute__((vector_size(32)));
     const float *h0 = rs->coef + (size_t)i * 8;
     const float *h1 = h0 + 8;
-    const float complex *x = rs->w + rs->w_pos;
-    float complex acc = 0;
-    for (unsigned k = 0; k < 8; k++)
-    {
-        float h = h0[k] + mu * (h1[k] - h0[k]);
-        acc += h * x[k];
-    }
-    return acc;
+    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
+    v8 hv, h0v, h1v, xrv, xiv, pr, pi;
+    memcpy(&h0v, h0, sizeof(hv));
+    memcpy(&h1v, h1, sizeof(hv));
+    memcpy(&xrv, xr, sizeof(hv));
+    memcpy(&xiv, xi, sizeof(hv));
+    hv = h0v + mu * (h1v - h0v);
+    pr = hv * xrv;
+    pi = hv * xiv;
+    float ar = pr[0] + pr[1] + pr[2] + pr[3] + pr[4] + pr[5] + pr[6] + pr[7];
+    float ai = pi[0] + pi[1] + pi[2] + pi[3] + pi[4] + pi[5] + pi[6] + pi[7];
+    return ar + ai * I;
 }
 
 // One polyphase branch: FIR of the decimated prototype against the delay line
 static float complex branch_out(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * rs->h_sub;
-    const float complex *x = rs->w + rs->w_pos;
-    float complex acc = 0;
+    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
+    float ar = 0, ai = 0;
 
     for (unsigned k = 0; k < rs->h_sub; k++)
-        acc += h[k] * x[k];
+    {
+        ar += h[k] * xr[k];
+        ai += h[k] * xi[k];
+    }
 
-    return acc;
+    return ar + ai * I;
 }
 
 /* Branch pair (i, i+1) mixed at mu, then one FIR pass: the linear output
@@ -89,22 +107,28 @@ static float complex branch_mix(const struct resampler *rs, int i, float mu)
 {
     const float *h0 = rs->coef + (size_t)i * rs->h_sub;
     const float *h1 = h0 + rs->h_sub;
-    const float complex *x = rs->w + rs->w_pos;
-    float complex acc = 0;
+    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
+    float ar = 0, ai = 0;
 
     for (unsigned k = 0; k < rs->h_sub; k++)
     {
         float h = h0[k] + mu * (h1[k] - h0[k]);
-        acc += h * x[k];
+        ar += h * xr[k];
+        ai += h * xi[k];
     }
 
-    return acc;
+    return ar + ai * I;
 }
 
 static void push_sample(struct resampler *rs, float complex x)
 {
-    rs->w[rs->w_pos] = x;             // overwrite the oldest slot; it becomes the newest
-    rs->w[rs->w_pos + rs->h_sub] = x; // mirror: keeps (w_pos .. +h_sub) linear
+    // overwrite the oldest slots; they become the newest (mirrored ahead too,
+    // keeping the (w_pos .. +h_sub) windows contiguous)
+    float re = __real__ x, im = __imag__ x;
+    rs->w_re[rs->w_pos] = re;
+    rs->w_im[rs->w_pos] = im;
+    rs->w_re[rs->w_pos + rs->h_sub] = re;
+    rs->w_im[rs->w_pos + rs->h_sub] = im;
     if (++rs->w_pos == rs->h_sub)
         rs->w_pos = 0;
 }
@@ -257,9 +281,10 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     float gain = (float)npfb / sum; // normalize the branch bank to unit DC gain
 
     rs->coef = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef));
-    rs->w = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w)); // mirrored delay line
+    rs->w_re = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_re)); // mirrored delay line
+    rs->w_im = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_im));
     rs->block = malloc((size_t)((unsigned)ceil(rate) + 2) * sizeof(*rs->block));
-    if (!rs->coef || !rs->w || !rs->block)
+    if (!rs->coef || !rs->w_re || !rs->w_im || !rs->block)
     {
         free(hf);
         resampler_destroy(rs);
@@ -291,7 +316,8 @@ void resampler_destroy(struct resampler *rs)
     if (!rs)
         return;
     free(rs->coef);
-    free(rs->w);
+    free(rs->w_re);
+    free(rs->w_im);
     free(rs->block);
     free(rs);
 }
