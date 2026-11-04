@@ -8,10 +8,10 @@ description: Profile the receiver with valgrind + callgrind — function/line/ca
 Every performance verdict rests on **two metrics, both measured**:
 
 - **Ir** — instruction counts from callgrind. Deterministic for a given binary
-  + input, so two runs compare exactly and attribution goes down to a line.
-  This is the *finder*.
+  - input, so two runs compare exactly and attribution goes down to a line.
+    This is the _finder_.
 - **Wall clock** — seconds, from `tools/regression_perf.py` (RTx) or plain
-  `time` on the release binary. This is the *confirmer*: the user feels
+  `time` on the release binary. This is the _confirmer_: the user feels
   seconds, not instructions, and an Ir win can vanish in cache or branch
   effects.
 
@@ -93,7 +93,7 @@ Conventions that keep the reading honest:
 - **Recursion double-counts inclusive cost** — trust the call-site table for
   recursive functions.
 - **`???` with no name** means the profile objects went stale: `make profile
-  -B`. A named `???` (`libfftw3f`, libm) is just a library without debug info
+-B`. A named `???` (`libfftw3f`, libm) is just a library without debug info
   and is attributed fine.
 - **Ir is not seconds.** Cache-sim events are counts too. Wall clock has its
   own section below.

@@ -1,23 +1,23 @@
 ---
 name: meshtastic-presets
-description: Reference table of all Meshtastic LoRa modem presets — general-purpose (Short/Medium/Long × Fast/Slow/Turbo/Moderate) and narrowband (Lite/Narrow/Tiny) — with SF, bandwidth, coding rate, data rate and region legality per preset. Use whenever the user names any Meshtastic preset or asks what parameters, defaults or regional restrictions a preset has — even in passing, e.g. "use LongFast for this run" or "same preset as the capture".
+description: Reference table of all Meshtastic LoRa presets — general-purpose (Short/Medium/Long × Fast/Slow/Turbo/Moderate) and narrowband (Lite/Narrow/Tiny) — with SF, bandwidth, coding rate and data rate per preset. Use when the user names any Meshtastic preset, asks what parameters a preset has, or wants a sweep/measurement for a preset other than the repo's MediumFast default — even if they just say "sweep LongFast" or "use the same preset as the capture".
 ---
 
 # Meshtastic presets
 
 ## General-purpose presets
 
-| Preset                | Alt name                             | Data rate  | SF  | CR  | BW      |
-| --------------------- | ------------------------------------ | ---------- | --- | --- | ------- |
-| Short Range / Turbo   | Short Turbo                          | 21.88 kbps | 7   | 4/5 | 500 kHz |
-| Short Range / Fast    | Short Fast                           | 10.94 kbps | 7   | 4/5 | 250 kHz |
-| Short Range / Slow    | Short Slow                           | 6.25 kbps  | 8   | 4/5 | 250 kHz |
-| Medium Range / Turbo  | Medium Turbo                         | 7.03 kbps  | 9   | 4/5 | 500 kHz |
-| Medium Range / Fast   | Medium Fast                          | 3.52 kbps  | 9   | 4/5 | 250 kHz |
-| Medium Range / Slow   | Medium Slow                          | 1.95 kbps  | 10  | 4/5 | 250 kHz |
-| Long Range / Turbo    | Long Turbo                           | 1.34 kbps  | 11  | 4/8 | 500 kHz |
-| Long Range / Fast     | **Long Fast** (Meshtastic default)   | 1.07 kbps  | 11  | 4/5 | 250 kHz |
-| Long Range / Moderate | Long Moderate                        | 0.34 kbps  | 11  | 4/8 | 125 kHz |
+| Preset                | Alt name                           | Data rate  | SF  | CR  | BW      |
+| --------------------- | ---------------------------------- | ---------- | --- | --- | ------- |
+| Short Range / Turbo   | Short Turbo                        | 21.88 kbps | 7   | 4/5 | 500 kHz |
+| Short Range / Fast    | Short Fast                         | 10.94 kbps | 7   | 4/5 | 250 kHz |
+| Short Range / Slow    | Short Slow                         | 6.25 kbps  | 8   | 4/5 | 250 kHz |
+| Medium Range / Turbo  | Medium Turbo                       | 7.03 kbps  | 9   | 4/5 | 500 kHz |
+| Medium Range / Fast   | Medium Fast (repo favourite)       | 3.52 kbps  | 9   | 4/5 | 250 kHz |
+| Medium Range / Slow   | Medium Slow                        | 1.95 kbps  | 10  | 4/5 | 250 kHz |
+| Long Range / Turbo    | Long Turbo                         | 1.34 kbps  | 11  | 4/8 | 500 kHz |
+| Long Range / Fast     | **Long Fast** (Meshtastic default) | 1.07 kbps  | 11  | 4/5 | 250 kHz |
+| Long Range / Moderate | Long Moderate                      | 0.34 kbps  | 11  | 4/8 | 125 kHz |
 
 ## Narrowband presets (region-restricted)
 
