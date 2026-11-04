@@ -44,6 +44,8 @@ static void usage(void)
                  "\t         least-reliable codewords on their runner-ups\n"
                  "\t[--chase-k N] [--chase-tau X] retry tuning with --chase\n"
                  "\t         (defaults: 8 suspects, LLR-loss budget 1.0)\n"
+                 "\t[--report-bad] also write CRC-invalid frames to stdout\n"
+                 "\t         (default: only CRC-valid and CRC-absent frames)\n"
                  "\t[-g db]  IF gain reduction, 0..59 dB (default: automatic);\n"
                  "\t         giving -g or -L selects manual gain\n"
                  "\t[-L n]   LNA state (RSP1: 0..2, 0 = max gain)\n"
@@ -95,6 +97,7 @@ int main(int argc, char **argv)
     struct chase_config chase = CHASE_CONFIG_DEFAULTS;
     int conjugate_iq = 0;
     int dc_block = 0;
+    int report_bad = 0;
     double center_freq = 0.0; // required: an RSP must be tuned
     double bandwidth = 250e3;
     int gain_rdb = -1;         // < 0 with lna: API AGC
@@ -113,6 +116,7 @@ int main(int argc, char **argv)
         OPT_CHASE,
         OPT_CHASE_K,
         OPT_CHASE_TAU,
+        OPT_REPORT_BAD,
     };
     static const struct option long_opts[] = {
         {"conj", no_argument, NULL, OPT_CONJ},
@@ -123,6 +127,7 @@ int main(int argc, char **argv)
         {"chase", no_argument, NULL, OPT_CHASE},
         {"chase-k", required_argument, NULL, OPT_CHASE_K},
         {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
+        {"report-bad", no_argument, NULL, OPT_REPORT_BAD},
         {NULL, 0, NULL, 0},
     };
 
@@ -157,6 +162,9 @@ int main(int argc, char **argv)
             break;
         case OPT_CHASE_TAU:
             chase.tau = strtof(optarg, NULL);
+            break;
+        case OPT_REPORT_BAD:
+            report_bad = 1;
             break;
         case 'g':
             gain_rdb = (int)strtol(optarg, NULL, 10);
@@ -284,6 +292,7 @@ int main(int argc, char **argv)
             .center_freq = center_freq,
             .bandwidth = bandwidth,
             .chase = chase,
+            .report_crc_bad = report_bad,
         };
         rx = receiver_create(&cfg);
     }

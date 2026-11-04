@@ -232,7 +232,7 @@ def print_packet(pkt, meta, key_label, as_json, verbose):
     hops = pkt.hop_start - pkt.hop_limit
     decoded = pkt.WhichOneof("payload_variant") == "decoded"
     name = portname(pkt.decoded) if decoded else "ENCRYPTED"
-    flag = f"{meta.get('snr', '?')} dB  crc {meta.get('crc', '?')}"
+    flag = f"{meta.get('snr', '?')} dB" + ("  (no CRC)" if meta.get("no_crc") else "")
     key = f"  key {key_label}" if verbose and decoded else ""
     print(flush=True)
     print(f"[{time.strftime('%H:%M:%S')}] {name:<22} {flag}{key}")
@@ -254,14 +254,17 @@ def print_packet(pkt, meta, key_label, as_json, verbose):
 
 
 def record_meta(rec):
-    """One JSONL frame record -> the meta dict print_packet/learn expect."""
-    if not rec["crc_present"]:
-        crc = "absent"
-    elif rec["crc_valid"]:
-        crc = "valid!"
-    else:
-        crc = "invalid"
-    return {"b64": rec["packet"], "snr": rec["snr_db"], "cfo": rec["cfo_hz"], "crc": crc}
+    """One JSONL frame record -> the meta dict print_packet/learn expect.
+
+    CRC-invalid frames never reach stdout unless the binary runs with
+    --report-bad, so what arrives is trusted; only the rare no-CRC frame
+    is annotated."""
+    return {
+        "b64": rec["packet"],
+        "snr": rec["snr_db"],
+        "cfo": rec["cfo_hz"],
+        "no_crc": not rec["crc_present"],
+    }
 
 
 def feed(args, keys):
