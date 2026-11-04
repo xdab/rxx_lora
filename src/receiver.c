@@ -33,7 +33,34 @@
 
 #define MAX_SF 12        // widest LLR row: one chip per bit position
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
-#define MAX_BYTES 255    // the PHY length field is one byte
+
+/* Rewind depth past a bad frame's fire, in whole symbol windows: after a
+ * header-fail or CRC-bad verdict the scan restarts this many symbols past
+ * the fire window. Deeper skips cut the redundant re-decode cycles on long
+ * noise spans (the re-fire re-forms ~5 windows after each rewind) but can
+ * step over a real preamble hiding within SKIP windows of the fire. Sweep
+ * verdict (captures + noise-heavy baleya files, K=1..10): every recovery
+ * holds flat through K=8, the re-attempt activity drops ~10-75% on the
+ * noisiest cells, and K=10 steps over a real frame; 4 sits well inside the
+ * flat region. Sweepable in experimental builds: REWIND_SKIP (1..10). */
+#define REWIND_SKIP_SYMS 4
+
+static unsigned rewind_skip_syms(void)
+{
+#if RXX_EXPERIMENTAL // env-var knob: rewind depth past a bad fire
+    static unsigned cached;
+    if (!cached)
+    {
+        const char *e = getenv("REWIND_SKIP");
+        long v = e ? strtol(e, NULL, 10) : REWIND_SKIP_SYMS;
+        cached = v < 1 || v > 10 ? (unsigned)REWIND_SKIP_SYMS : (unsigned)v;
+    }
+    return cached;
+#else
+    return REWIND_SKIP_SYMS;
+#endif
+}
+#define MAX_BYTES 255 // the PHY length field is one byte
 
 struct receiver
 {
@@ -396,9 +423,15 @@ static enum frame_decode decode_frame(
  * Hunt the preamble one window at a time; on a fire, advance to the first
  * network-id symbol and return 1. Returns 0 at end of stream, -1 on error.
  * The look-ahead source_advance() keeps the sync word's history readable.
+ * fire_pos receives the fire window's own position, before the coarse jump:
+ * the caller rewinds to just past it when the frame verdict comes back bad.
  */
-static int
-detect_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_sync_status *st)
+static int detect_frame(
+    struct source *src,
+    struct frame_sync *fs,
+    size_t *pos,
+    struct frame_sync_status *st,
+    size_t *fire_pos)
 {
     const float complex *w;
 
@@ -421,6 +454,7 @@ detect_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct fram
              * the reference */
             int64_t next = (int64_t)*pos + advance;
 
+            *fire_pos = *pos; // the fire window itself, ahead of the coarse jump
             *pos = next > 0 ? (size_t)next : 0;
             log_debug(
                 "frame detected: k_hat=%d over %d windows -> coarse sync: "
@@ -604,10 +638,11 @@ int receiver_run(struct receiver *r, struct source *src)
 
     size_t pos = 0;
     size_t lock_pos = 0; // frame start: where DETECT fired
+    size_t fire_pos = 0; // the fire window itself, before the coarse jump
     for (;;)
     {
         size_t frame_pos = pos;
-        int detected = detect_frame(src, fs, &pos, &st);
+        int detected = detect_frame(src, fs, &pos, &st, &fire_pos);
 
         if (detected < 0)
             goto done;
@@ -647,6 +682,18 @@ int receiver_run(struct receiver *r, struct source *src)
                 n_truncated++;
                 break;
             }
+
+            /* A bad verdict hides whatever fired underneath the failed decode:
+             * a noise sync's misread pay_len can park the payload walk across
+             * later real preambles (DETECT runs for no phase but DETECT).
+             * Rewind to one symbol past the fire window — the ring still holds
+             * the whole span (nothing drops mid-decode) — and rescan it. The
+             * rewind target strictly advances per attempt, so a fire-prone
+             * noise stretch costs re-attempts, never a loop. Real frames cut
+             * off by the stream's end have nothing to recover: truncated is
+             * not rewound. */
+            if (verdict == DECODE_HEADER || verdict == DECODE_CRC_BAD)
+                pos = fire_pos + (size_t)rewind_skip_syms() * st.samples_per_symbol;
         }
 
         // rewind for the next frame; the guard keeps the scan moving even if
