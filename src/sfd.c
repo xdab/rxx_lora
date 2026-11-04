@@ -91,7 +91,10 @@ static float complex sfd_raw(const struct frame_sync *s, const float complex *in
 }
 
 /* Anti-alias FIR + os-decimation of the N-chip slot at `off`:
- * dst[j] = filtered x[off + j*os]; the centered FIR keeps the time origin. */
+ * dst[j] = filtered x[off + j*os]; the centered FIR keeps the time origin.
+ * The tap window slides monotonically, so the outputs split into an interior
+ * run (fully inside the retention, reads in[] directly) and at most two
+ * sfd_raw()-clamped edge runs. */
 static void
 sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, float complex *dst)
 {
@@ -105,9 +108,80 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
     }
 
     const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
-    for (uint32_t j = 0; j < n; j++)
+    const int64_t os = s->oversampling_factor;
+    const int64_t back = -(int64_t)SYNC_LOOKAHEAD * (int64_t)s->samples_per_symbol;
+    const int64_t fwd = (int64_t)(SYNC_LOOKAHEAD + 1) * (int64_t)s->samples_per_symbol;
+
+    // interior range: base >= back and base + fir_n <= fwd, base = off + j*os - half
+    uint32_t j_lo = 0;
     {
-        int64_t base = off + (int64_t)j * (int64_t)s->oversampling_factor - (int64_t)half;
+        int64_t lo = (back + half - off + os - 1) / os; // ceil, first fully valid j
+        if (lo > 0)
+            j_lo = (uint32_t)(lo < (int64_t)n ? lo : (int64_t)n);
+    }
+    uint32_t j_hi = n;
+    {
+        // first j with base + fir_n > fwd
+        int64_t hi = (fwd - (int64_t)s->sfd.fir_n + half - off + os - 1) / os;
+        if (hi < (int64_t)n)
+            j_hi = (uint32_t)(hi > 0 ? hi : 0);
+    }
+
+    // low edge: tap window clipped at the retention start
+    for (uint32_t j = 0; j < j_lo; j++)
+    {
+        int64_t base = off + (int64_t)j * os - (int64_t)half;
+        float complex acc = 0;
+        for (unsigned t = 0; t < s->sfd.fir_n; t++)
+            acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
+        dst[j] = acc;
+    }
+    if (j_lo < j_hi)
+    { // interior: stage the span once (split re/im), then whole-vector dots
+        // over the zero-padded taps; lane-parallel sums (reorder rounding)
+        typedef float v8 __attribute__((vector_size(32)));
+        typedef float v4 __attribute__((vector_size(16)));
+        const unsigned vec_n = (s->sfd.fir_n + 7) / 8;
+        const unsigned pad = vec_n * 8;
+        const int64_t stage_base = off + (int64_t)j_lo * os - (int64_t)half;
+        const size_t stage_len = (size_t)((int64_t)(j_hi - 1 - j_lo) * os + (int64_t)s->sfd.fir_n);
+        float *st_re = s->sfd.st_re, *st_im = s->sfd.st_im;
+        for (size_t i = 0; i < stage_len; i++)
+        {
+            float complex v = in[stage_base + (int64_t)i];
+            st_re[i] = __real__ v;
+            st_im[i] = __imag__ v;
+        }
+        // zero the tail the pad taps over-read
+        memset(st_re + stage_len, 0, (pad - s->sfd.fir_n) * sizeof(*st_re));
+        memset(st_im + stage_len, 0, (pad - s->sfd.fir_n) * sizeof(*st_im));
+        for (uint32_t j = j_lo; j < j_hi; j++)
+        {
+            const float *xr = st_re + (size_t)(j - j_lo) * os;
+            const float *xi = st_im + (size_t)(j - j_lo) * os;
+            v8 ar = {0}, ai = {0};
+            for (unsigned v = 0; v < vec_n; v++)
+            {
+                v8 hv, xrv, xiv;
+                memcpy(&hv, s->sfd.fir_v + (size_t)v * 8, sizeof(hv));
+                memcpy(&xrv, xr + (size_t)v * 8, sizeof(hv));
+                memcpy(&xiv, xi + (size_t)v * 8, sizeof(hv));
+                ar += hv * xrv;
+                ai += hv * xiv;
+            }
+            v4 rl, rh, il, ih;
+            memcpy(&rl, &ar, sizeof(rl));
+            memcpy(&rh, (const char *)&ar + sizeof(rl), sizeof(rl));
+            memcpy(&il, &ai, sizeof(rl));
+            memcpy(&ih, (const char *)&ai + sizeof(rl), sizeof(rl));
+            v4 rt = rl + rh, it = il + ih;
+            dst[j] = (rt[0] + rt[1] + rt[2] + rt[3]) + (it[0] + it[1] + it[2] + it[3]) * I;
+        }
+    }
+    // high edge: clipped at the retention end
+    for (uint32_t j = j_hi; j < n; j++)
+    {
+        int64_t base = off + (int64_t)j * os - (int64_t)half;
         float complex acc = 0;
         for (unsigned t = 0; t < s->sfd.fir_n; t++)
             acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
@@ -259,6 +333,18 @@ int sfd_alloc(struct frame_sync *s)
     for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
         f->fir[t] /= sum;
 
+    // fir_v: fir zero-padded to whole vectors; st: worst-case staging span
+    // (one symbol of os-strided taps + the pad)
+    memcpy(f->fir_v, f->fir, f->fir_n * sizeof(*f->fir));
+    memset(f->fir_v + f->fir_n, 0, (SFD_FIR_PAD - f->fir_n) * sizeof(*f->fir_v));
+    f->st_re = malloc((s->samples_per_symbol + SFD_FIR_PAD) * sizeof(*f->st_re));
+    f->st_im = malloc((s->samples_per_symbol + SFD_FIR_PAD) * sizeof(*f->st_im));
+    if (!f->st_re || !f->st_im)
+    {
+        sfd_free(s);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -277,6 +363,8 @@ void sfd_free(struct frame_sync *s)
     free(f->fine_up);
     free(f->cx_in);
     free(f->cx_out);
+    free(f->st_re);
+    free(f->st_im);
     if (f->slot_fft_cfg)
         dsp_fft_free(f->slot_fft_cfg);
     if (f->lock_fft_cfg)
