@@ -13,15 +13,10 @@ struct resampler
     unsigned npfb;      // number of polyphase branches
     unsigned h_sub;     // taps per branch = 2m
     float *coef;        // npfb*h_sub branch taps, row i oldest-tap-first
-    float *coef_d;      // npfb*h_sub tap deltas d[i][k] = h[i+1][k] - h[i][k]:
-                        // the per-output interpolation recomputes the same
-                        // difference every output; rounding is identical (same
-                        // operands, one rounding), so the kernel loads d
-                        // instead of h1 and drops a vector sub
-    float *w_re, *w_im; // circular delay line, split real/imag, mirrored to
-                        // 2*h_sub slots each: every push writes both [pos] and
-                        // [pos+h_sub], so a window (w_pos .. +h_sub) never wraps
-                        // and the 8-tap kernel loads it as two whole vectors
+    float *coef_d;      // npfb*h_sub tap deltas, d[i][k] = h[i+1][k] - h[i][k]:
+                        // the mix kernel forms h0 + mu*d with one FMA
+    float *w_re, *w_im; // circular delay line, split re/im, mirrored to
+                        // 2*h_sub slots: a (w_pos .. +h_sub) window never wraps
     unsigned w_pos;     // delay-line write position; slot w_pos is the oldest
     float rate;         // output/input sample rate
     float del;          // timing step per output = 1/rate
@@ -45,9 +40,8 @@ enum
     RESAMP_INTERP,   // regular interpolation
 };
 
-/* Fixed-8-tap kernels: constant bound, contiguous window (the mirrored delay
- * line below makes (p + k) wrap-free); the generic loops cover every other
- * h_sub. */
+/* Fixed-8-tap kernels: constant bound, contiguous window; the generic loops
+ * cover every other h_sub. */
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;
@@ -64,11 +58,9 @@ static float complex branch_out_8(const struct resampler *rs, int i)
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (branch, mix) distinct types at call sites
 static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
 {
-    /* The whole 8-tap dot in four vector ops: interpolate the taps as one
-     * vector, multiply into the split delay-line windows, then two explicit
-     * horizontal sums. The manual form sidesteps the FP-reassociation barrier
-     * that keeps gcc from vectorizing the scalar loop; the summation order is
-     * fixed by the horizontal tree, not left to the compiler. */
+    /* The 8-tap dot as whole vectors with pairwise horizontal sums: gcc will
+     * not vectorize the scalar FP reduction on its own, so the form is
+     * explicit and the summation order is fixed. */
     typedef float v8 __attribute__((vector_size(32)));
     const float *h0 = rs->coef + (size_t)i * 8;
     const float *d = rs->coef_d + (size_t)i * 8;
@@ -81,10 +73,7 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
     hv = h0v + mu * dv;
     pr = hv * xrv;
     pi = hv * xiv;
-    /* Pairwise horizontal sums: one 128-bit combine per vector, then a
-     * 3-add scalar tail — roughly half the cost of the lane-by-lane chain.
-     * The tree reorders the rounding vs the sequential sum, so this is not
-     * bit exact; it's gated by the regression arm like any filter change. */
+    // pairwise hsum: one 128-bit combine per vector, then a 3-add tail
     typedef float v4 __attribute__((vector_size(16)));
     v4 rl, rh, il, ih;
     memcpy(&rl, &pr, sizeof(rl));
@@ -138,8 +127,7 @@ static float complex branch_mix(const struct resampler *rs, int i, float mu)
 
 static void push_sample(struct resampler *rs, float complex x)
 {
-    // overwrite the oldest slots; they become the newest (mirrored ahead too,
-    // keeping the (w_pos .. +h_sub) windows contiguous)
+    // overwrite the oldest slots (mirrored ahead — keeps kernel windows contiguous)
     float re = __real__ x, im = __imag__ x;
     rs->w_re[rs->w_pos] = re;
     rs->w_im[rs->w_pos] = im;
@@ -168,8 +156,8 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     float tau = rs->tau, bf = rs->bf, mu = rs->mu;
     int b = rs->b;
 
-    // one boundary completion per at most npfb outputs; handle it up front so
-    // the steady INTERP path below needs no per-output state check
+    // boundary completion: at most one per execute, up front so the loop
+    // below is pure INTERP
     if (rs->state == RESAMP_BOUNDARY)
     {
         rs->y1 = rs->f_out(rs, 0);
@@ -179,7 +167,7 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     }
 
     while (b < (int)rs->npfb - 1)
-    { // steady path: the only shape an output takes 63 of every 64 outputs
+    {
         y[n++] = rs->f_mix(rs, b, mu);
         update_timing(rs, &tau, &bf, &b, &mu);
     }
@@ -295,7 +283,7 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
 
     rs->coef = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef));
     rs->coef_d = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef_d));
-    rs->w_re = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_re)); // mirrored delay line
+    rs->w_re = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_re));
     rs->w_im = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_im));
     rs->block = malloc((size_t)((unsigned)ceil(rate) + 2) * sizeof(*rs->block));
     if (!rs->coef || !rs->coef_d || !rs->w_re || !rs->w_im || !rs->block)
@@ -309,8 +297,7 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
         for (unsigned k = 0; k < rs->h_sub; k++)
             rs->coef[(size_t)i * rs->h_sub + k] = hf[i + (rs->h_sub - 1 - k) * npfb] * gain;
 
-    // tap deltas for the INTERP mix (rows 0..npfb-2; the last branch parks
-    // into the boundary path and never mixes)
+    // tap deltas for the mix kernel (the last branch parks instead of mixing)
     for (unsigned i = 0; i + 1 < npfb; i++)
         for (unsigned k = 0; k < rs->h_sub; k++)
             rs->coef_d[(size_t)i * rs->h_sub + k] =

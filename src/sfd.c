@@ -92,11 +92,9 @@ static float complex sfd_raw(const struct frame_sync *s, const float complex *in
 
 /* Anti-alias FIR + os-decimation of the N-chip slot at `off`:
  * dst[j] = filtered x[off + j*os]; the centered FIR keeps the time origin.
- * The tap window [base, base + fir_n) slides forward monotonically, so the
- * outputs split into three runs: low-edge (window clipped at the retention
- * start), interior (fully inside — reads in[] directly, no per-tap bounds
- * check), high-edge (clipped at the retention end). The edge runs keep the
- * sfd_raw() zero-padding semantics. */
+ * The tap window slides monotonically, so the outputs split into an interior
+ * run (fully inside the retention, reads in[] directly) and at most two
+ * sfd_raw()-clamped edge runs. */
 static void
 sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, float complex *dst)
 {
@@ -129,6 +127,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
             j_hi = (uint32_t)(hi > 0 ? hi : 0);
     }
 
+    // low edge: tap window clipped at the retention start
     for (uint32_t j = 0; j < j_lo; j++)
     {
         int64_t base = off + (int64_t)j * os - (int64_t)half;
@@ -138,10 +137,8 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
         dst[j] = acc;
     }
     if (j_lo < j_hi)
-    { // vector interior: stage the span once (split re/im), then each output
-        // is a whole-vector dot over the zero-padded taps. The lane-parallel
-        // sum reorders rounding vs the sequential form — gated by the
-        // regression arm like any filter change.
+    { // interior: stage the span once (split re/im), then whole-vector dots
+        // over the zero-padded taps; lane-parallel sums (reorder rounding)
         typedef float v8 __attribute__((vector_size(32)));
         typedef float v4 __attribute__((vector_size(16)));
         const unsigned vec_n = (s->sfd.fir_n + 7) / 8;
@@ -155,7 +152,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
             st_re[i] = __real__ v;
             st_im[i] = __imag__ v;
         }
-        // the zero taps over-read past the span; zero the tail they touch
+        // zero the tail the pad taps over-read
         memset(st_re + stage_len, 0, (pad - s->sfd.fir_n) * sizeof(*st_re));
         memset(st_im + stage_len, 0, (pad - s->sfd.fir_n) * sizeof(*st_im));
         for (uint32_t j = j_lo; j < j_hi; j++)
@@ -181,6 +178,7 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
             dst[j] = (rt[0] + rt[1] + rt[2] + rt[3]) + (it[0] + it[1] + it[2] + it[3]) * I;
         }
     }
+    // high edge: clipped at the retention end
     for (uint32_t j = j_hi; j < n; j++)
     {
         int64_t base = off + (int64_t)j * os - (int64_t)half;
@@ -335,8 +333,8 @@ int sfd_alloc(struct frame_sync *s)
     for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
         f->fir[t] /= sum;
 
-    // vector copy: fir zero-padded to whole 8-lane vectors, and the interior
-    // staging span (worst case: one symbol minus os of lead-in + the tap pad)
+    // fir_v: fir zero-padded to whole vectors; st: worst-case staging span
+    // (one symbol of os-strided taps + the pad)
     memcpy(f->fir_v, f->fir, f->fir_n * sizeof(*f->fir));
     memset(f->fir_v + f->fir_n, 0, (SFD_FIR_PAD - f->fir_n) * sizeof(*f->fir_v));
     f->st_re = malloc((s->samples_per_symbol + SFD_FIR_PAD) * sizeof(*f->st_re));
