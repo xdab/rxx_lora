@@ -13,6 +13,11 @@ struct resampler
     unsigned npfb;      // number of polyphase branches
     unsigned h_sub;     // taps per branch = 2m
     float *coef;        // npfb*h_sub branch taps, row i oldest-tap-first
+    float *coef_d;      // npfb*h_sub tap deltas d[i][k] = h[i+1][k] - h[i][k]:
+                        // the per-output interpolation recomputes the same
+                        // difference every output; rounding is identical (same
+                        // operands, one rounding), so the kernel loads d
+                        // instead of h1 and drops a vector sub
     float *w_re, *w_im; // circular delay line, split real/imag, mirrored to
                         // 2*h_sub slots each: every push writes both [pos] and
                         // [pos+h_sub], so a window (w_pos .. +h_sub) never wraps
@@ -66,14 +71,14 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
      * fixed by the horizontal tree, not left to the compiler. */
     typedef float v8 __attribute__((vector_size(32)));
     const float *h0 = rs->coef + (size_t)i * 8;
-    const float *h1 = h0 + 8;
+    const float *d = rs->coef_d + (size_t)i * 8;
     const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
-    v8 hv, h0v, h1v, xrv, xiv, pr, pi;
+    v8 hv, h0v, dv, xrv, xiv, pr, pi;
     memcpy(&h0v, h0, sizeof(hv));
-    memcpy(&h1v, h1, sizeof(hv));
+    memcpy(&dv, d, sizeof(hv));
     memcpy(&xrv, xr, sizeof(hv));
     memcpy(&xiv, xi, sizeof(hv));
-    hv = h0v + mu * (h1v - h0v);
+    hv = h0v + mu * dv;
     pr = hv * xrv;
     pi = hv * xiv;
     /* Pairwise horizontal sums: one 128-bit combine per vector, then a
@@ -289,10 +294,11 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     float gain = (float)npfb / sum; // normalize the branch bank to unit DC gain
 
     rs->coef = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef));
+    rs->coef_d = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef_d));
     rs->w_re = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_re)); // mirrored delay line
     rs->w_im = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_im));
     rs->block = malloc((size_t)((unsigned)ceil(rate) + 2) * sizeof(*rs->block));
-    if (!rs->coef || !rs->w_re || !rs->w_im || !rs->block)
+    if (!rs->coef || !rs->coef_d || !rs->w_re || !rs->w_im || !rs->block)
     {
         free(hf);
         resampler_destroy(rs);
@@ -302,6 +308,13 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     for (unsigned i = 0; i < npfb; i++)
         for (unsigned k = 0; k < rs->h_sub; k++)
             rs->coef[(size_t)i * rs->h_sub + k] = hf[i + (rs->h_sub - 1 - k) * npfb] * gain;
+
+    // tap deltas for the INTERP mix (rows 0..npfb-2; the last branch parks
+    // into the boundary path and never mixes)
+    for (unsigned i = 0; i + 1 < npfb; i++)
+        for (unsigned k = 0; k < rs->h_sub; k++)
+            rs->coef_d[(size_t)i * rs->h_sub + k] =
+                rs->coef[(size_t)(i + 1) * rs->h_sub + k] - rs->coef[(size_t)i * rs->h_sub + k];
 
     free(hf);
 
@@ -324,6 +337,7 @@ void resampler_destroy(struct resampler *rs)
     if (!rs)
         return;
     free(rs->coef);
+    free(rs->coef_d);
     free(rs->w_re);
     free(rs->w_im);
     free(rs->block);
