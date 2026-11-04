@@ -12,7 +12,9 @@ struct resampler
     unsigned npfb;    // number of polyphase branches
     unsigned h_sub;   // taps per branch = 2m
     float *coef;      // npfb*h_sub branch taps, row i oldest-tap-first
-    float complex *w; // circular delay line, h_sub slots
+    float complex *w; // circular delay line, mirrored to 2*h_sub slots: every
+                      // push writes both w[pos] and w[pos+h_sub], so a window
+                      // (w_pos .. w_pos+h_sub) never wraps and reads linearly
     unsigned w_pos;   // delay-line write position; slot w_pos is the oldest
     float rate;       // output/input sample rate
     float del;        // timing step per output = 1/rate
@@ -36,15 +38,16 @@ enum
     RESAMP_INTERP,   // regular interpolation
 };
 
-/* Fixed-8-tap kernels: constant bound, no wrap branch; selected once at
- * create, the generic loops below cover every other h_sub. */
+/* Fixed-8-tap kernels: constant bound, contiguous window (the mirrored delay
+ * line below makes (p + k) wrap-free); the generic loops cover every other
+ * h_sub. */
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;
-    unsigned p = rs->w_pos;
+    const float complex *x = rs->w + rs->w_pos;
     float complex acc = 0;
     for (unsigned k = 0; k < 8; k++)
-        acc += h[k] * rs->w[(p + k) & (rs->h_sub - 1)];
+        acc += h[k] * x[k];
     return acc;
 }
 
@@ -53,12 +56,12 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
 {
     const float *h0 = rs->coef + (size_t)i * 8;
     const float *h1 = h0 + 8;
-    unsigned p = rs->w_pos;
+    const float complex *x = rs->w + rs->w_pos;
     float complex acc = 0;
     for (unsigned k = 0; k < 8; k++)
     {
         float h = h0[k] + mu * (h1[k] - h0[k]);
-        acc += h * rs->w[(p + k) & (rs->h_sub - 1)];
+        acc += h * x[k];
     }
     return acc;
 }
@@ -67,15 +70,11 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
 static float complex branch_out(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * rs->h_sub;
-    unsigned oldest = rs->w_pos;
+    const float complex *x = rs->w + rs->w_pos;
     float complex acc = 0;
 
     for (unsigned k = 0; k < rs->h_sub; k++)
-    {
-        acc += h[k] * rs->w[oldest];
-        if (++oldest == rs->h_sub)
-            oldest = 0;
-    }
+        acc += h[k] * x[k];
 
     return acc;
 }
@@ -90,15 +89,13 @@ static float complex branch_mix(const struct resampler *rs, int i, float mu)
 {
     const float *h0 = rs->coef + (size_t)i * rs->h_sub;
     const float *h1 = h0 + rs->h_sub;
-    unsigned oldest = rs->w_pos;
+    const float complex *x = rs->w + rs->w_pos;
     float complex acc = 0;
 
     for (unsigned k = 0; k < rs->h_sub; k++)
     {
         float h = h0[k] + mu * (h1[k] - h0[k]);
-        acc += h * rs->w[oldest];
-        if (++oldest == rs->h_sub)
-            oldest = 0;
+        acc += h * x[k];
     }
 
     return acc;
@@ -106,7 +103,8 @@ static float complex branch_mix(const struct resampler *rs, int i, float mu)
 
 static void push_sample(struct resampler *rs, float complex x)
 {
-    rs->w[rs->w_pos] = x; // overwrite the oldest slot; it becomes the newest
+    rs->w[rs->w_pos] = x;             // overwrite the oldest slot; it becomes the newest
+    rs->w[rs->w_pos + rs->h_sub] = x; // mirror: keeps (w_pos .. +h_sub) linear
     if (++rs->w_pos == rs->h_sub)
         rs->w_pos = 0;
 }
@@ -259,7 +257,7 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     float gain = (float)npfb / sum; // normalize the branch bank to unit DC gain
 
     rs->coef = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef));
-    rs->w = calloc(rs->h_sub, sizeof(*rs->w));
+    rs->w = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w)); // mirrored delay line
     rs->block = malloc((size_t)((unsigned)ceil(rate) + 2) * sizeof(*rs->block));
     if (!rs->coef || !rs->w || !rs->block)
     {
