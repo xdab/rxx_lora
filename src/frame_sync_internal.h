@@ -34,6 +34,9 @@ enum frame_sync_subphase
 /** Anti-alias FIR length for the SFD slot pipeline (src/sfd.c). */
 #define SFD_FIR_TAPS 65
 
+/** The same FIR zero-padded to whole 8-lane vectors (ceil(65/8)*8). */
+#define SFD_FIR_PAD 72
+
 /** Fine-pass reference spectra: down-ref slots (x 4N each); the up-ref row
  *  holding the sigma2 slot (the SFD start at shift 0). */
 #define SFD_FINE_DN 12
@@ -63,6 +66,11 @@ struct sfd
 {
     float fir[SFD_FIR_TAPS];   // anti-alias FIR before the os-decimation
     unsigned fir_n;            // taps in fir[] actually in use (per-os design)
+    float fir_v[SFD_FIR_PAD];  // fir zero-padded to whole vectors; no aligned
+                               // attribute — the struct is heap-allocated at
+                               // 16, and unaligned vector moves are free here
+    float *st_re, *st_im;      // interior staging span, split re/im (the
+                               // vector dot reads whole windows linearly)
     void *slot_fft_cfg;        // 4N-point FFT plan (slot spectra)
     void *lock_fft_cfg;        // coherent-lock FFT plan, lock_len points
     uint32_t lock_len;         // zero-padded lock FFT length (power of two)
