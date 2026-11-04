@@ -34,15 +34,9 @@
 #define MAX_SF 12        // widest LLR row: one chip per bit position
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
 
-/* Rewind depth past a bad frame's fire, in whole symbol windows: after a
- * header-fail or CRC-bad verdict the scan restarts this many symbols past
- * the fire window. Deeper skips cut the redundant re-decode cycles on long
- * noise spans (the re-fire re-forms ~5 windows after each rewind) but can
- * step over a real preamble hiding within SKIP windows of the fire. Sweep
- * verdict (captures + noise-heavy baleya files, K=1..10): every recovery
- * holds flat through K=8, the re-attempt activity drops ~10-75% on the
- * noisiest cells, and K=10 steps over a real frame; 4 sits well inside the
- * flat region. Sweepable in experimental builds: REWIND_SKIP (1..10). */
+/* Rewind depth past a bad frame's fire, in whole symbol windows. Deeper skips
+ * cut the re-decode cycles on noise spans but can step over a real preamble
+ * hiding within SKIP windows of the fire. Experimental sweep: REWIND_SKIP. */
 #define REWIND_SKIP_SYMS 4
 
 static unsigned rewind_skip_syms(void)
@@ -675,9 +669,6 @@ int receiver_run(struct receiver *r, struct source *src)
                 break;
             case DECODE_CRC_BAD:
                 n_crc_bad++;
-                /* corrupt bytes stay off stdout unless asked for: downstream
-                 * consumers (mesh_rx, packet taps) must never see them by
-                 * default; --report-bad opts back in */
                 if (r->report_crc_bad)
                     report_frame(&res, verdict, &st, src, lock_pos);
                 break;
@@ -689,15 +680,9 @@ int receiver_run(struct receiver *r, struct source *src)
                 break;
             }
 
-            /* A bad verdict hides whatever fired underneath the failed decode:
-             * a noise sync's misread pay_len can park the payload walk across
-             * later real preambles (DETECT runs for no phase but DETECT).
-             * Rewind to one symbol past the fire window — the ring still holds
-             * the whole span (nothing drops mid-decode) — and rescan it. The
-             * rewind target strictly advances per attempt, so a fire-prone
-             * noise stretch costs re-attempts, never a loop. Real frames cut
-             * off by the stream's end have nothing to recover: truncated is
-             * not rewound. */
+            /* a bad verdict can hide a later real preamble under the failed
+             * decode: rewind past the fire window and rescan (truncated
+             * frames have nothing to recover) */
             if (verdict == DECODE_HEADER || verdict == DECODE_CRC_BAD)
                 pos = fire_pos + (size_t)rewind_skip_syms() * st.samples_per_symbol;
         }

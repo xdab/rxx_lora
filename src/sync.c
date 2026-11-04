@@ -722,14 +722,8 @@ int frame_sync_sync_step(
     int done = s->phase != FS_SYNC;
     if (done)
     {
-        /* The snap's grid correction plus the whole-bin CFO slip can walk the
-         * payload grid back behind the fire — only on a noise sync whose CFO
-         * estimate is garbage (real traffic's slips are bounded well inside
-         * sps/4). Unsigned, such a consume wrapped into a ~2^32-sample jump:
-         * the next source_window NULLed and the receiver exited "end of
-         * stream" mid-file, dropping every frame after the noise. Clamp at 0
-         * like the DETECT advance; the frame decodes where we stand and dies
-         * on its header if it is noise. */
+        /* a noise sync's grid correction + whole-bin CFO can walk the payload
+         * grid back behind the fire; clamp at 0 like the DETECT advance */
         if (s->consume < 0)
         {
             log_debug("sync: payload grid walked back %d samples, clamped\n", -s->consume);

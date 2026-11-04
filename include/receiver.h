@@ -37,8 +37,7 @@ struct receiver_config
     double center_freq;
     double bandwidth;
     struct chase_config chase;
-    int report_crc_bad; // also emit CRC-invalid frames on stdout; default off
-                        // (--report-bad), so consumers never see corrupt bytes
+    int report_crc_bad;
 };
 
 struct receiver *receiver_create(const struct receiver_config *cfg);
