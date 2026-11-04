@@ -25,7 +25,10 @@ the binary as `-w`, hex string verbatim. `--center-hz` only feeds the crystal
 error model (`--ppm`); it does not tune anything. The default window is
 `--snr-min -21 --snr-max -14 --snr-step 1`. 250 trials per point is the
 default depth; go lower only while probing (below), higher when asked or when
-the error counts say the waterfall is still under-sampled.
+the error counts say the waterfall is still under-sampled. Sweeps
+parallelize over trials with `--jobs`, which defaults to every core — pass
+`--jobs $(( $(nproc) - 2 ))` to leave the machine breathing room for other
+CPU-heavy work; the draws, summary and verdicts are identical either way.
 
 MediumFast is the only preset listed here. For any other Meshtastic preset
 (Short/Medium/Long × Fast/Slow/Turbo/Moderate, or the narrowband Lite/Narrow/
@@ -56,9 +59,9 @@ regression parameters, exit 1 on mismatch.
 
 ## Probe first, then zoom
 
-Never open with the full sweep. A probe run — fewer trials, wider window,
+Don't open with a huge sweep. A probe run — fewer trials, wider window,
 coarser step — locates the waterfall cheaply; the zoom sweep then spends the
-full 250 trials only where the curve actually bends:
+full trials only where the curve actually bends, example:
 
 ```sh
 # probe: ~1 min instead of ~10 — just enough to see where errors start
@@ -116,10 +119,14 @@ coded-dotted, one color per SF, no titles. It sweeps by itself, or replots
 saved logs when any are passed:
 
 ```sh
-python3 tools/ber_readme.py                          # sweep all SFs
-python3 tools/ber_readme.py --sfs 7,9,12             # subset
+python3 tools/ber_readme.py --sfs 7,8,9,10,11,12 \
+    --trials 3500,10:2000,11:1500,12:1000 --snr-step 1 --os 2
 python3 tools/ber_readme.py /tmp/ber/sf7.log /tmp/ber/sf9.log  # replot only
 ```
+
+The first line is the recommended default for the full figure; the
+`--trials` spec is `default[,SF:N]...` — 3500 per point, dialed down on the
+high-SF arms.
 
 Reach for it when the deliverable is the README figure or an all-SF
 overview; reach for plain `ber.py` + `ber_combine.py` for everything else.
