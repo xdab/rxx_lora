@@ -67,6 +67,7 @@ struct receiver
     struct frame_sync *fs;
     struct demod_state demod; // allocated once, reset per frame
     struct chase_config chase;
+    int report_crc_bad; // emit CRC-invalid frames on stdout (--report-bad)
     int sf;
 };
 
@@ -589,6 +590,7 @@ struct receiver *receiver_create(const struct receiver_config *cfg)
         return NULL;
 
     r->chase = cfg->chase;
+    r->report_crc_bad = cfg->report_crc_bad;
     r->sf = cfg->sf;
     r->fs = frame_sync_create(
         (uint8_t)cfg->sf,
@@ -673,7 +675,11 @@ int receiver_run(struct receiver *r, struct source *src)
                 break;
             case DECODE_CRC_BAD:
                 n_crc_bad++;
-                report_frame(&res, verdict, &st, src, lock_pos);
+                /* corrupt bytes stay off stdout unless asked for: downstream
+                 * consumers (mesh_rx, packet taps) must never see them by
+                 * default; --report-bad opts back in */
+                if (r->report_crc_bad)
+                    report_frame(&res, verdict, &st, src, lock_pos);
                 break;
             case DECODE_HEADER:
                 n_header_fail++;

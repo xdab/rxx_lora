@@ -31,6 +31,8 @@ static void usage(void)
                  "\t         least-reliable codewords on their runner-ups\n"
                  "\t[--chase-k N] [--chase-tau X] retry tuning with --chase\n"
                  "\t         (defaults: 8 suspects, LLR-loss budget 1.0)\n"
+                 "\t[--report-bad] also write CRC-invalid frames to stdout\n"
+                 "\t         (default: only CRC-valid and CRC-absent frames)\n"
                  "\t[-v [N]] verbosity: 1 (or bare -v) adds DEBUG, 2 adds TRACE\n"
                  "\t[-q [N]] quietness: 1 drops INFO, 2 drops WARN, 3 silences stderr\n"
                  "\t[--conj] conjugate the samples first (mirrored-spectrum captures)\n"
@@ -59,6 +61,7 @@ int main(int argc, char **argv)
     struct chase_config chase = CHASE_CONFIG_DEFAULTS;
     int conjugate_iq = 0;
     int dc_block = 0;
+    int report_bad = 0;
     double center_freq = 0.0;
     double bandwidth = 250e3;
     double input_rate = 0.0;
@@ -73,6 +76,7 @@ int main(int argc, char **argv)
         OPT_CHASE,
         OPT_CHASE_K,
         OPT_CHASE_TAU,
+        OPT_REPORT_BAD,
     };
     static const struct option long_opts[] = {
         {"conj", no_argument, NULL, OPT_CONJ},
@@ -83,6 +87,7 @@ int main(int argc, char **argv)
         {"chase", no_argument, NULL, OPT_CHASE},
         {"chase-k", required_argument, NULL, OPT_CHASE_K},
         {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
+        {"report-bad", no_argument, NULL, OPT_REPORT_BAD},
         {NULL, 0, NULL, 0},
     };
 
@@ -117,6 +122,9 @@ int main(int argc, char **argv)
             break;
         case OPT_CONJ:
             conjugate_iq = 1;
+            break;
+        case OPT_REPORT_BAD:
+            report_bad = 1;
             break;
         case OPT_DC_BLOCK:
             dc_block = 1;
@@ -175,6 +183,7 @@ int main(int argc, char **argv)
             .center_freq = center_freq,
             .bandwidth = bandwidth,
             .chase = chase,
+            .report_crc_bad = report_bad,
         };
         rx = receiver_create(&cfg);
     }
