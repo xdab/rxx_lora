@@ -33,6 +33,18 @@ channel simulators, and the regression gates. `tools/README.md` has a finer inde
 material the regression gate decodes; `data/README.md` has the PHY details.
 This is a very large folder, so we keep it uncommitted (it's gitignored, too).
 
+## Skills
+
+`.agents/skills/` holds agent skills — one `SKILL.md` per directory — that
+capture recurring workflows around this repo (sweeps, profiling, reference
+tables). They are development artifacts, not set in stone: when a change
+alters what a skill describes (tools, flags, defaults, workflow), update the
+skill in the same change as the code. The documentation rules below apply to
+skills to a working degree — current state only, references resolve, no
+duplication — except where the skill format wins: the frontmatter
+`description` is the trigger surface and should name both what the skill does
+and the user phrasings that should fire it.
+
 ## Regression checks
 
 `python3 tools/regression.py` is the commit gate and needs `bin/file_lora` built
