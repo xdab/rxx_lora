@@ -91,7 +91,12 @@ static float complex sfd_raw(const struct frame_sync *s, const float complex *in
 }
 
 /* Anti-alias FIR + os-decimation of the N-chip slot at `off`:
- * dst[j] = filtered x[off + j*os]; the centered FIR keeps the time origin. */
+ * dst[j] = filtered x[off + j*os]; the centered FIR keeps the time origin.
+ * The tap window [base, base + fir_n) slides forward monotonically, so the
+ * outputs split into three runs: low-edge (window clipped at the retention
+ * start), interior (fully inside — reads in[] directly, no per-tap bounds
+ * check), high-edge (clipped at the retention end). The edge runs keep the
+ * sfd_raw() zero-padding semantics. */
 static void
 sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, float complex *dst)
 {
@@ -105,9 +110,44 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
     }
 
     const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
-    for (uint32_t j = 0; j < n; j++)
+    const int64_t os = s->oversampling_factor;
+    const int64_t back = -(int64_t)SYNC_LOOKAHEAD * (int64_t)s->samples_per_symbol;
+    const int64_t fwd = (int64_t)(SYNC_LOOKAHEAD + 1) * (int64_t)s->samples_per_symbol;
+
+    // interior range: base >= back and base + fir_n <= fwd, base = off + j*os - half
+    uint32_t j_lo = 0;
     {
-        int64_t base = off + (int64_t)j * (int64_t)s->oversampling_factor - (int64_t)half;
+        int64_t lo = (back + half - off + os - 1) / os; // ceil, first fully valid j
+        if (lo > 0)
+            j_lo = (uint32_t)(lo < (int64_t)n ? lo : (int64_t)n);
+    }
+    uint32_t j_hi = n;
+    {
+        // first j with base + fir_n > fwd
+        int64_t hi = (fwd - (int64_t)s->sfd.fir_n + half - off + os - 1) / os;
+        if (hi < (int64_t)n)
+            j_hi = (uint32_t)(hi > 0 ? hi : 0);
+    }
+
+    for (uint32_t j = 0; j < j_lo; j++)
+    {
+        int64_t base = off + (int64_t)j * os - (int64_t)half;
+        float complex acc = 0;
+        for (unsigned t = 0; t < s->sfd.fir_n; t++)
+            acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
+        dst[j] = acc;
+    }
+    for (uint32_t j = j_lo; j < j_hi; j++)
+    {
+        const float complex *x = in + (off + (int64_t)j * os - (int64_t)half);
+        float complex acc = 0;
+        for (unsigned t = 0; t < s->sfd.fir_n; t++)
+            acc += s->sfd.fir[t] * x[t];
+        dst[j] = acc;
+    }
+    for (uint32_t j = j_hi; j < n; j++)
+    {
+        int64_t base = off + (int64_t)j * os - (int64_t)half;
         float complex acc = 0;
         for (unsigned t = 0; t < s->sfd.fir_n; t++)
             acc += s->sfd.fir[t] * sfd_raw(s, in, base + (int64_t)t);
