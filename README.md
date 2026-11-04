@@ -76,8 +76,7 @@ Others are deliberate omissions - linked liquid-dsp was replaced with a scavenge
 make 
 sudo make install
 
-# OR one binary at a time — `file` needs no SDR library, `rtl` only librtlsdr,
-# `rsp` only the SDRplay API
+# OR one binary at a time, e.g. when another binary's dependency is missing
 make file
 make rtl
 make rsp
