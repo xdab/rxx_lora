@@ -76,8 +76,19 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
     hv = h0v + mu * (h1v - h0v);
     pr = hv * xrv;
     pi = hv * xiv;
-    float ar = pr[0] + pr[1] + pr[2] + pr[3] + pr[4] + pr[5] + pr[6] + pr[7];
-    float ai = pi[0] + pi[1] + pi[2] + pi[3] + pi[4] + pi[5] + pi[6] + pi[7];
+    /* Pairwise horizontal sums: one 128-bit combine per vector, then a
+     * 3-add scalar tail — roughly half the cost of the lane-by-lane chain.
+     * The tree reorders the rounding vs the sequential sum, so this is not
+     * bit exact; it's gated by the regression arm like any filter change. */
+    typedef float v4 __attribute__((vector_size(16)));
+    v4 rl, rh, il, ih;
+    memcpy(&rl, &pr, sizeof(rl));
+    memcpy(&rh, (const char *)&pr + sizeof(rl), sizeof(rl));
+    memcpy(&il, &pi, sizeof(rl));
+    memcpy(&ih, (const char *)&pi + sizeof(rl), sizeof(rl));
+    v4 rt = rl + rh, it = il + ih;
+    float ar = rt[0] + rt[1] + rt[2] + rt[3];
+    float ai = it[0] + it[1] + it[2] + it[3];
     return ar + ai * I;
 }
 
