@@ -163,30 +163,27 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     float tau = rs->tau, bf = rs->bf, mu = rs->mu;
     int b = rs->b;
 
-    while (b < (int)rs->npfb)
+    // one boundary completion per at most npfb outputs; handle it up front so
+    // the steady INTERP path below needs no per-output state check
+    if (rs->state == RESAMP_BOUNDARY)
     {
-        if (rs->state == RESAMP_BOUNDARY)
-        {
-            rs->y1 = rs->f_out(rs, 0);
-            y[n++] = (1.0f - mu) * rs->y0 + mu * rs->y1;
-            update_timing(rs, &tau, &bf, &b, &mu);
-            rs->state = RESAMP_INTERP;
-        }
-        else
-        {
-            if (b == (int)rs->npfb - 1)
-            {
-                // last branch: the next sample must arrive to interpolate
-                rs->y0 = rs->f_out(rs, b);
-                rs->state = RESAMP_BOUNDARY;
-                b = (int)rs->npfb;
-            }
-            else
-            {
-                y[n++] = rs->f_mix(rs, b, mu);
-                update_timing(rs, &tau, &bf, &b, &mu);
-            }
-        }
+        rs->y1 = rs->f_out(rs, 0);
+        y[n++] = (1.0f - mu) * rs->y0 + mu * rs->y1;
+        update_timing(rs, &tau, &bf, &b, &mu);
+        rs->state = RESAMP_INTERP;
+    }
+
+    while (b < (int)rs->npfb - 1)
+    { // steady path: the only shape an output takes 63 of every 64 outputs
+        y[n++] = rs->f_mix(rs, b, mu);
+        update_timing(rs, &tau, &bf, &b, &mu);
+    }
+
+    if (b == (int)rs->npfb - 1)
+    { // last branch: the next sample must arrive to interpolate
+        rs->y0 = rs->f_out(rs, b);
+        rs->state = RESAMP_BOUNDARY;
+        b = (int)rs->npfb;
     }
 
     tau -= 1.0f;
