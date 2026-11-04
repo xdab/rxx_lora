@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--reps", type=int, default=15)
     a = ap.parse_args()
 
-    d, dig, n = run_once(a.binary)  # warm-up, supplies the digest
+    _, dig, n = run_once(a.binary)  # warm-up, supplies the digest
     times = [run_once(a.binary)[0] for _ in range(a.reps)]
     med = statistics.median(times)
     print(f"{a.binary}: median {med:.3f} s  (min {min(times):.3f}, max {max(times):.3f})")
