@@ -508,7 +508,7 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
         if (s->sync_words[1] != 0 && abs(d1 + 8) <= 2 && abs(dsp) <= 2)
         {
             s->net_id_off = 0; // the -8 is the wrong symbol, not a slip
-            s->consume = s->samples_per_symbol;
+            s->consume = (int32_t)s->samples_per_symbol;
             *early_walk = 1;
             log_debug(
                 "netid early walk: dec %d,%d -> grid advanced one symbol\n",
@@ -613,7 +613,7 @@ int frame_sync_sync_step(
         s->symb_corr[j] = s->in_down[j] * s->cfo_correc[j];
 
     s->bin_idx = frame_sync_get_symbol_val(s, s->symb_corr, s->downchirp);
-    s->consume = s->samples_per_symbol;
+    s->consume = (int32_t)s->samples_per_symbol;
 
     switch (s->symbol_cnt)
     {
@@ -708,7 +708,8 @@ int frame_sync_sync_step(
         s->sfo_cum = ((s->sto_frac * osf) - (float)util_round(s->sto_frac * osf)) / osf;
         // frame_info tag not ported
         // One chip per bin, driven by the whole-bin part as in the reference.
-        s->consume += s->samples_per_symbol / 4 + s->oversampling_factor * cfo_int;
+        s->consume +=
+            (int32_t)(s->samples_per_symbol / 4) + (int32_t)s->oversampling_factor * cfo_int;
         s->symbol_cnt = 0;
         break;
     }
@@ -720,7 +721,22 @@ int frame_sync_sync_step(
 
     int done = s->phase != FS_SYNC;
     if (done)
-        *advance = s->consume; // 1 once the verdict moved us out of SYNC
+    {
+        /* The snap's grid correction plus the whole-bin CFO slip can walk the
+         * payload grid back behind the fire — only on a noise sync whose CFO
+         * estimate is garbage (real traffic's slips are bounded well inside
+         * sps/4). Unsigned, such a consume wrapped into a ~2^32-sample jump:
+         * the next source_window NULLed and the receiver exited "end of
+         * stream" mid-file, dropping every frame after the noise. Clamp at 0
+         * like the DETECT advance; the frame decodes where we stand and dies
+         * on its header if it is noise. */
+        if (s->consume < 0)
+        {
+            log_debug("sync: payload grid walked back %d samples, clamped\n", -s->consume);
+            s->consume = 0;
+        }
+        *advance = (uint32_t)s->consume; // 1 once the verdict moved us out of SYNC
+    }
     if (st)
         frame_sync_status(s, st);
     return done;
@@ -743,7 +759,7 @@ const float complex *frame_sync_output_step(
     {
         // no STO correction, CFO left in
         memcpy(s->out_win, s->in_down, s->number_of_bins * sizeof(*s->in_down));
-        s->consume = s->samples_per_symbol;
+        s->consume = (int32_t)s->samples_per_symbol;
 
         if (fabsf(s->sfo_cum) > 1.0f / 2 / (float)s->oversampling_factor)
         {
