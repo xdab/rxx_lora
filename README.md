@@ -76,6 +76,12 @@ Others are deliberate omissions - linked liquid-dsp was replaced with a scavenge
 make 
 sudo make install
 
+# OR one binary at a time — `file` needs no SDR library, `rtl` only librtlsdr,
+# `rsp` only the SDRplay API
+make file
+make rtl
+make rsp
+
 # Quick tests
 python3 tools/regression.py
 python3 tools/regression_perf.py
