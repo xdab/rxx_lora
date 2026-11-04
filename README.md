@@ -10,46 +10,64 @@ SDRplay RSPs in the spirit of
 [`rtl_fm`](https://gitea.osmocom.org/sdr/rtl-sdr/src/branch/master/src/rtl_fm.c):
 SDR in, decoded packets out, no GNU Radio.
 
-| Packets from an I/Q capture file                                   | Meshtastic frames from an RTL-SDR                                     |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+The receiver implements the standard LoRa PHY, so while the examples here lean
+Meshtastic, it should be equally applicable to LoRaWAN, MeshCore, APRS-over-LoRa on
+70 cm, or any other CSS/LoRa-based signalling (maybe even your smart water meter).
+
+## Screenshots
+
+Screenshots of the terminal... yes.
+If I (or you!) get to build something cooler running on top of `rxx_lora`, it might be put here. From what's in the repo, this is what can be shown:
+
+| Packets from an I/Q capture file | Meshtastic frames from an RTL-SDR |
+|----------------------------------|-----------------------------------|
 | <img src="img/console-jsonl.png" alt="JSONL packets" width="350"/> | <img src="img/console-mesh.png" alt="Meshtastic frames" width="350"/> |
+
+## Goals
+
+Though I can't guarantee this being the case in the present, eventually this project **aims** to:
+
+- cover all realistic (documented to be possible or seen "in the wild") physical layer combinations, that is every: spreading factor, bandwidth (of the standard ones), coding rate
+
+- on each of the above, achieve sensitivity closely matching (preferably exceeding) that of a hardware modem
+
+- run orders of magnitude faster than real time, including on older hardware
+
+In all, `rxx_lora` is meant to stay a thin and reliable layer turning RF into decoded frames - getting out of the way for whatever comes after, with no opinion on what the frames are for.
+
+A beautiful, interactive application/presentation layer is notably **not** a primary goal, though some examples can be given in `tools/` or elsewhere.
+
+Whatever the real application is - a mesh map, MQTT gateway, data scraper, lab experiment - by integrating `rxx_lora` as its low-level layer, it should stop caring about any DSP processing... interleaving... dewhitening sequences, checksums. It simply gets frames through `stdout` and JSONL. The end.
 
 ## Dependencies
 
-The project aims to have minimal dependencies.
-Naturally, the likes of `librtlsdr` are unavoidable if support for the actual device is to be present. Others are deliberate picks - FFT3 was added as testing revealed significant performance gains compared to a hand-rolled implementation.
+The project aims to have minimal dependencies, a rule of thumb being "someone who played with SDRs before should have them already".
+
+Naturally, the likes of `librtlsdr` are unavoidable if support for the actual device is to be present (same goes for the SDRplay API).
+
+Some are deliberate picks - FFT3 was added as testing revealed significant performance gains compared to a hand-rolled implementation.
+
+Others are deliberate omissions - linked liquid-dsp was replaced with a scavenged handful of its source files, subsequently tweaked.
 
 ### **C** (main project)
 
-- normal OS: Linux, MacOS (probably)
-- modern C compiler
-- `make`
-- [FFTW](https://www.fftw.org) v3 + headers:
-  - Debian/Ubuntu: `libfftw3-dev`
-  - Fedora: `fftw` `fftw-devel`
-  - Arch: `fftw`
-- [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers (for `rtl_lora`):
-  - Debian/Ubuntu: `librtlsdr0` `librtlsdr-dev`
-  - Fedora: `rtl-sdr` `rtl-sdr-devel`
-  - Arch: `rtl-sdr`
-- [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers (for `rsp_lora`;
-  Linux only, and its `sdrplay_apiService` daemon must be running):
-  - all distros: the vendor's `.run` installer
-- (Optional) `clang-format` formatter:
-  - Debian/Ubuntu: `clang-format`
-  - Fedora: `clang-tools-extra`
-  - Arch: `clang`
-- (Optional) `clang-tidy` static analyzer (`make tidy`):
-  - Debian/Ubuntu: `clang-tidy`
-  - Fedora: `clang-tools-extra`
-  - Arch: `clang`
+| Dependency | For | Debian/Ubuntu | Fedora | Arch |
+|------------|-----|---------------|--------|------|
+| modern C compiler + `make` | building | `build-essential` | `gcc` `make` | `base-devel` |
+| [FFTW](https://www.fftw.org) v3 + headers | all binaries | `libfftw3-dev` | `fftw` `fftw-devel` | `fftw` |
+| [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers | `rtl_lora` | `librtlsdr0` `librtlsdr-dev` | `rtl-sdr` `rtl-sdr-devel` | `rtl-sdr` |
+| [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers | `rsp_lora` | vendor's `.run` installer | vendor's `.run` installer | vendor's `.run` installer |
+| `clang-format` *(optional)* | `make fmt` | `clang-format` | `clang-tools-extra` | `clang` |
+| `clang-tidy` *(optional)* | `make tidy` | `clang-tidy` | `clang-tools-extra` | `clang` |
 
 ### **Python** (optional, helper tools)
 
-- Python 3.10 (or higher)
-- `numpy` `matplotlib`
-- (Optional) `ruff` linter and formatter
-- (Optional) the [Meshtastic](https://pypi.org/project/meshtastic/) library; for `tools/mesh_rx.py`
+| Dependency | For | Install |
+|------------|-----|---------|
+| Python 3.10+ | the tools themselves | your package manager / `pyenv` |
+| `numpy` `matplotlib` | frame building, BER sweeps, plots | `pip install numpy matplotlib` |
+| `ruff` *(optional)* | `make fmt` / `make fmt-check` | `pip install ruff` |
+| [Meshtastic](https://pypi.org/project/meshtastic/) library *(optional)* | `tools/mesh_rx.py` | `pip install meshtastic` |
 
 ## Building, testing and running
 
@@ -83,13 +101,22 @@ python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4
 
 ## Performance
 
-End-to-end simulation under AWGN shows satisfactory results.
+Sensitivity-wise, for the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1 dB** of theoretical performance at SNRs above -16 dB.
 
-For the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1 dB** of theoretical performance at SNRs above -16 dB.
-
-| BER vs SNR under AWGN                                             |
-| ----------------------------------------------------------------- |
+| BER vs SNR under AWGN |
+|-----------------------|
 | <img src="img/ber-vs-snr.png" alt="BER vs SNR plot" width="600"/> |
+
+_The plot above can be re-generated with `tools/ber_readme.py` at any time._
+
+And it is not just simulation: in live reception valid decodes regularly pop up down to SNR as low as -15 dB. The same is true of I/Q recordings made with other SDR software and processed by the `file_lora` binary variant.
+
+### Speed
+
+In short: `rxx_lora` is very fast.
+The entire chain - detection, sync, demodulation, error correction - runs at dozens to hundreds of times real time, depending on the PHY parameters and hardware.
+
+`tools/regression_perf.py` measures this on your built binary in ~20 seconds or so, and should act as a secondary, "common sense" quality gate for code changes.
 
 ## Credits
 
