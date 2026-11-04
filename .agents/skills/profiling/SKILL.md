@@ -8,7 +8,7 @@ description: Profile the receiver with valgrind + callgrind — function/line/ca
 Every performance verdict rests on **two metrics, both measured**:
 
 - **Ir** — instruction counts from callgrind. Deterministic for a given binary
-  - input, so two runs compare exactly and attribution goes down to a line.
+  + input, so two runs compare exactly and attribution goes down to a line.
     This is the _finder_.
 - **Wall clock** — seconds, from `tools/regression_perf.py` (RTx) or plain
   `time` on the release binary. This is the _confirmer_: the user feels
@@ -93,7 +93,7 @@ Conventions that keep the reading honest:
 - **Recursion double-counts inclusive cost** — trust the call-site table for
   recursive functions.
 - **`???` with no name** means the profile objects went stale: `make profile
--B`. A named `???` (`libfftw3f`, libm) is just a library without debug info
+  -B`. A named `???` (`libfftw3f`, libm) is just a library without debug info
   and is attributed fine.
 - **Ir is not seconds.** Cache-sim events are counts too. Wall clock has its
   own section below.
@@ -112,11 +112,27 @@ time ./bin/file_lora <flags> capture.cf32 > /dev/null
 Quote both numbers in any performance claim — e.g. "−42% wall clock, −49% Ir"
 — because neither alone proves the other.
 
+## Campaigns
+
+An optimization campaign is a chain of paired A/Bs: one logical change per
+commit, and the artifacts branded with the commit they belong to —
+
+```sh
+d=/tmp/prof/$(git rev-parse --short HEAD); mkdir -p "$d"
+cp bin/file_lora.prof "$d"/ && valgrind --tool=callgrind \
+  --callgrind-out-file="$d/cg.out" ./bin/file_lora.prof ...
+```
+
+(reusing the quick-start flags). An old profile stays exactly valid for the
+binary that produced it, so comparing two commits is just two `hotspots.py`
+runs on two archived outs — the hash names every arm.
+
 ## Gotchas
 
 - One-time init (resampler/filter design) over-weights short captures;
   compare captures of similar length or ignore `*_create` call sites when
   extrapolating to streaming.
 - `--cache-sim=yes` adds the miss events; without it only Ir/Dr/Dw exist.
-- Attribution moves with the binary: re-profile after every change rather
-  than reasoning from an old profile.
+- Attribution moves with the binary: a current claim needs a current profile,
+  which is why archived outs are branded per commit (Campaigns, above) —
+  never re-read an old profile as if it described today's binary.
