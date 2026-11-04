@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """regression_perf.py — the performance twin of regression.py: same verdicts,
-but the number beside each is speed (RTx = iq samples of IQ per wall second)."""
+but the number beside each is speed (RTx = iq samples of IQ per wall second).
+Every capture interleaves 5 frames with 6 noise snippets so the fixed
+per-run costs (process start, file read) are amortized over 5 decodes."""
 
 import argparse
 import base64
@@ -22,6 +24,9 @@ from common import add_awgn
 
 SYNC = [8, 16]  # the 0x12 private sync word, as hardcoded in main.c
 
+N_FRAMES = 5  # frames per capture: per-run fixed costs amortize over 5 decodes
+GAP_SYMS = 2  # silent inter-frame gap on noise-less rows (DETECT re-arm)
+
 
 @dataclass
 class Case:
@@ -34,8 +39,7 @@ class Case:
     cr: int = 1  # coding rate 4/(4+cr)
     pl: int = 64  # payload bytes
     snr: float | None = None  # AWGN bed level [dB]; None = clean capture
-    pre_s: float = 0.0  # seconds of noise before the frame (guard-time walk)
-    post_s: float = 0.0  # seconds of noise after it (detect stops at the frame)
+    pre_s: float = 0.0  # seconds of noise per bed snippet (guard-time walk)
     avg: int = 4  # receiver -a (DETECT averaging depth)
     pre: int = 8  # receiver -p: preamble upchirps required (n_up_req = pre-3)
     pre_gen: int = 0  # preamble upchirps in the capture; 0 = same as `pre`
@@ -57,7 +61,6 @@ class Case:
             self.pl,
             self.snr,
             self.pre_s,
-            self.post_s,
             self.pre_gen or self.pre,
             self.sto,
             self.cfo,
@@ -83,32 +86,56 @@ def noise_bed(n, p_sig, snr_db, rng):
 
 
 def build_capture(case: Case, path: str, seed: int = 1):
-    """Write the case's cf32 capture; return (n_samples, truth payload bytes).
-    Noise is concatenated around the frame, never summed over it, so the
-    verdict stays deterministic."""
+    """Write the case's cf32 capture; return (n_samples, truth payloads).
+
+    The capture interleaves N_FRAMES frames with N_FRAMES + 1 noise
+    snippets — (noise)(frame)(noise)...(noise) — so every decode is preceded
+    by a DETECT walk and per-run fixed costs amortize over N_FRAMES decodes.
+    Noise is concatenated around the frames, never summed over them, so the
+    verdicts stay deterministic; where the case carries no bed (snr=None)
+    the snippets are short silent gaps, just enough for DETECT to re-arm.
+    Written part by part: the acquisition beds make the whole capture far
+    larger than any single part."""
     rng = np.random.default_rng(seed)
     sps = (1 << case.sf) * case.os
-    truth = rng.integers(0, 256, case.pl, dtype=np.uint8).tobytes()
-    frame, _ = frame_mod.generate(
-        sf=case.sf,
-        os_=case.os,
-        pre=case.pre_gen or case.pre,
-        sync=SYNC,
-        msg=truth,
-        cr=case.cr,
-        has_crc=True,
-        sto=case.sto,
-        cfo=case.cfo,
-    )
-    # file plumbing, not DSP: trailing zeros keep reads in bounds at the frame end
-    parts = [frame, np.zeros(sps // 2, dtype=frame.dtype)]
-    if case.snr is not None:
-        p_sig = float(np.mean(np.abs(frame) ** 2))
-        parts.insert(0, noise_bed(round(case.pre_s * case.fs), p_sig, case.snr, rng))
-        parts.append(noise_bed(round(case.post_s * case.fs), p_sig, case.snr, rng))
-    x = np.concatenate(parts)
-    x.astype(np.complex64).tofile(path)
-    return len(x), truth
+    frames, truths = [], []
+    for _ in range(N_FRAMES):
+        truth = rng.integers(0, 256, case.pl, dtype=np.uint8).tobytes()
+        frame, _ = frame_mod.generate(
+            sf=case.sf,
+            os_=case.os,
+            pre=case.pre_gen or case.pre,
+            sync=SYNC,
+            msg=truth,
+            cr=case.cr,
+            has_crc=True,
+            sto=case.sto,
+            cfo=case.cfo,
+        )
+        frames.append(frame)
+        truths.append(truth)
+    p_sig = float(np.mean(np.abs(frames[0]) ** 2))
+    gap_n = max(round(case.pre_s * case.fs), GAP_SYMS * sps)
+
+    def snippet():
+        if case.snr is None:
+            return np.zeros(gap_n, dtype=np.complex64)
+        return noise_bed(gap_n, p_sig, case.snr, rng)
+
+    n = 0
+    with open(path, "wb") as f:
+        parts = [snippet()]
+        for i, frame in enumerate(frames):
+            if i:
+                parts.append(snippet())
+            parts.append(frame)
+        parts.append(snippet())
+        # file plumbing, not DSP: trailing zeros keep reads in bounds at the frame end
+        parts.append(np.zeros(sps // 2, dtype=np.complex64))
+        for part in parts:
+            part.astype(np.complex64).tofile(f)
+            n += len(part)
+    return n, truths
 
 
 def case_cmd(case: Case, bin_path: str, iq: str):
@@ -127,18 +154,23 @@ def case_cmd(case: Case, bin_path: str, iq: str):
     ]
 
 
-def score(case: Case, out: str, truth):
-    """Score the receiver's JSONL frame records exactly as regression.py does."""
+def score(case: Case, out: str, truths):
+    """Score the receiver's JSONL frame records exactly as regression.py does,
+    one record per capture frame, each against its own truth payload."""
     recs = [json.loads(line) for line in out.splitlines() if line.strip()]
-    if not recs:
-        raise CaseFail("no frame decoded", out)
-    rec = recs[0]
-    got = base64.b64decode(rec["packet"])
-    ok = rec["crc_valid"] is True
-    if got != truth or not ok:
-        crc = "valid" if ok else ("absent" if not rec["crc_present"] else "INVALID")
-        raise CaseFail(f"expected {len(truth)} B + CRC valid; got {len(got)} B, CRC {crc}", out)
-    return f"{len(truth)} B exact, CRC valid"
+    if len(recs) != N_FRAMES:
+        raise CaseFail(f"expected {N_FRAMES} frame records, got {len(recs)}", out)
+    for i, (rec, truth) in enumerate(zip(recs, truths)):
+        got = base64.b64decode(rec["packet"])
+        ok = rec["crc_valid"] is True
+        if got != truth or not ok:
+            crc = "valid" if ok else ("absent" if not rec["crc_present"] else "INVALID")
+            raise CaseFail(
+                f"frame {i + 1}/{N_FRAMES}: expected {len(truth)} B + CRC valid; "
+                f"got {len(got)} B, CRC {crc}",
+                out,
+            )
+    return f"{N_FRAMES}x {len(truths[0])} B exact, CRC valid"
 
 
 def timed_run(cmd, reps):
@@ -173,9 +205,12 @@ def build_cases(seconds: float, snr: float):
     for mult in (1, 2):
         rows.append(
             (
-                f"acquisition (SF12, {mult * seconds:g}s noise bed @ {snr:g} dB, then frame)",
+                f"acquisition (SF12, {mult * seconds:g}s beds @ {snr:g} dB, 5 frames)",
                 Case(
-                    f"sf12 64 B after {mult * seconds:g}s bed", sf=12, snr=snr, pre_s=mult * seconds
+                    f"sf12 64 B x5 after {mult * seconds:g}s beds",
+                    sf=12,
+                    snr=snr,
+                    pre_s=mult * seconds,
                 ),
             )
         )
@@ -227,12 +262,14 @@ def main():
             "file-mode time scaling only (ber.py's convention), which is "
             "why the bandwidth rows reuse one capture and only rescale RTx. "
             "Wall time is the whole subprocess — process start, capture "
-            "read, detect, sync, demod, decode. Each case runs one warm-up "
-            "(which supplies the verdict) plus --reps timed runs; best is "
-            "the headline, median sits beside it. Process start-up is "
-            "measured once on a 4-sample file ('floor'); the 'start' column "
-            "is its share of each run, so a short frame's RTx is visibly a "
-            "floor, not a throughput.\n"
+            "read, detect, sync, demod, decode. Each capture interleaves "
+            "5 frames with 6 noise snippets (silent gaps on clean rows), "
+            "so those fixed costs amortize over 5 decodes. Each case runs "
+            "one warm-up (which supplies the verdict) plus --reps timed "
+            "runs; best is the headline, median sits beside it. Process "
+            "start-up is measured once on a 4-sample file ('floor'); the "
+            "'start' column is its share of each run, so a short frame's "
+            "RTx is visibly a floor, not a throughput.\n"
             "The matrix spans the two bottlenecks a live receiver has: "
             "acquisition (noise bed of --seconds before the frame, DETECT "
             "walking all its windows; SF12 only, shorter symbols false-lock "
@@ -247,7 +284,7 @@ def main():
         "--seconds",
         type=float,
         default=2.0,
-        help="seconds of noise in the acquisition bed (default 2)",
+        help="seconds of noise per bed snippet in the acquisition rows (default 2)",
     )
     p.add_argument("--snr", type=float, default=-10.0, help="noise-bed SNR in dB (default -10)")
     p.add_argument("--only", default=None, help="run only labels containing this substring")
@@ -271,7 +308,7 @@ def main():
     reps = 1 if args.selftest else max(1, args.reps)
     rows = build_cases(seconds, args.snr)
     if args.selftest:
-        want = ("sf12 64 B after 0.5s bed", "sf7 255 B cr4/5")
+        want = ("sf12 64 B x5 after 0.5s beds", "sf7 255 B cr4/5")
         rows = [r for r in rows if r[1].label in want]
     if args.only:
         rows = [r for r in rows if args.only in r[1].label]
@@ -284,7 +321,8 @@ def main():
         return
 
     print(
-        f"file_lora perf  seed=1  {len(rows)} cases  reps={reps}  bin={args.bin}\n"
+        f"file_lora perf  seed=1  {len(rows)} cases  reps={reps}  "
+        f"{N_FRAMES} frames/capture  bin={args.bin}\n"
         f"RTx = (iq samples / (bw*os)) / wall seconds; wall = the whole "
         f"subprocess (start + read + detect + demod + decode)"
     )
@@ -294,7 +332,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         floor = measure_floor(bin_path, tmp, reps)
         print(f"process floor: {floor * 1e3:.2f} ms (4-sample file, same argv shape)")
-        captures = {}  # cap_key -> (path, n_samples, truth)
+        captures = {}  # cap_key -> (path, n_samples, truths)
         section = None
         for i, (sec, case) in enumerate(rows):
             if sec != section:
@@ -303,13 +341,13 @@ def main():
             key = case.cap_key()
             if key not in captures:
                 iq = os.path.join(tmp, f"cap{i:02d}.cf32")
-                n, truth = build_capture(case, iq)
-                captures[key] = (iq, n, truth)
-            iq, n, truth = captures[key]
+                n, truths = build_capture(case, iq)
+                captures[key] = (iq, n, truths)
+            iq, n, truths = captures[key]
             cmd = case_cmd(case, bin_path, iq)
             try:
                 best, med, out = timed_run(cmd, reps)
-                note = score(case, out, truth)
+                note = score(case, out, truths)
             except CaseFail as e:
                 n_fail += 1
                 print(f"FAIL  {case.label:<26} {'':>30}  {e.why}")
