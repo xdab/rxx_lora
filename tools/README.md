@@ -27,6 +27,7 @@ with `--help` (module docstring plus argparse).
 | `ber_readme.py` | → README-style plot | The `img/ber-vs-snr.png` generator: runs one `ber.py` sweep per SF (per-SF pre-centered SNR windows) and overlays measured (solid, markers) with the closed-form theory (uncoded dashed, coded dotted), one color per SF, no titles. Give it saved sweep logs to replot instead of sweeping |
 | `regression.py` | → PASS/FAIL matrix | The commit gate: C-binary end-to-end decodes plus the real `data/capture*` frames in three netid arms. SKIPs (never FAILs) on a missing dep or unfetched LFS pointer |
 | `regression_perf.py` | → RTx matrix | The gate's speed twin: same verdicts plus the real-time multiplier per line. Verdicts gate the exit code, never the speed |
+| `prof/hotspots.py` | callgrind.out → tables | Function / hot-line / call-site Ir attribution from a callgrind profile (`--sort D1mr` for the cache view, `--callers NAME` for who-calls-what, `--selftest`). The workflow around it — build, run, interpretation — is the `profiling` skill |
 
 Shared CLI defaults: `--sf 7` (7–12), `--bw 125000`, `--os 2` samples/chip.
 IQ files are **cf32**: raw interleaved float32 I/Q, ±1.0, no header or padding.

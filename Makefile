@@ -119,7 +119,7 @@ clean:
 # C/H style via clang-format (.clang-format at repo root) + Python style for
 # tools/ via ruff. fmt-check is the gate counterpart — it exits nonzero, so it
 # can sit in a pre-commit hook.
-PY_SOURCES := $(wildcard tools/*.py)
+PY_SOURCES := $(wildcard tools/*.py) $(wildcard tools/prof/*.py)
 C_SOURCES := $(wildcard $(SRC_DIR)/*.c) $(wildcard include/*.h)
 
 .PHONY: fmt
