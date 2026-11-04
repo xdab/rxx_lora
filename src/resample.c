@@ -112,12 +112,13 @@ static void push_sample(struct resampler *rs, float complex x)
 }
 
 // Advance the fractional timing phase by one output sample
-static void update_timing(struct resampler *rs)
+static inline void update_timing(struct resampler *rs, float *tau, float *bf, int *b, float *mu)
 {
-    rs->tau += rs->del;
-    rs->bf = rs->tau * (float)rs->npfb;
-    rs->b = (int)floorf(rs->bf);
-    rs->mu = rs->bf - (float)rs->b;
+    *tau += rs->del;
+    *bf = *tau * (float)rs->npfb;
+    // bf >= 0 on every path here, so a truncating cast is floor
+    *b = (int)*bf;
+    *mu = *bf - (float)*b;
 }
 
 /* Run the resampler on one input sample, writing the completed outputs (at
@@ -126,36 +127,42 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
 {
     push_sample(rs, x);
     unsigned n = 0;
+    float tau = rs->tau, bf = rs->bf, mu = rs->mu;
+    int b = rs->b;
 
-    while (rs->b < (int)rs->npfb)
+    while (b < (int)rs->npfb)
     {
         if (rs->state == RESAMP_BOUNDARY)
         {
             rs->y1 = rs->f_out(rs, 0);
-            y[n++] = (1.0f - rs->mu) * rs->y0 + rs->mu * rs->y1;
-            update_timing(rs);
+            y[n++] = (1.0f - mu) * rs->y0 + mu * rs->y1;
+            update_timing(rs, &tau, &bf, &b, &mu);
             rs->state = RESAMP_INTERP;
         }
         else
         {
-            if (rs->b == (int)rs->npfb - 1)
+            if (b == (int)rs->npfb - 1)
             {
                 // last branch: the next sample must arrive to interpolate
-                rs->y0 = rs->f_out(rs, rs->b);
+                rs->y0 = rs->f_out(rs, b);
                 rs->state = RESAMP_BOUNDARY;
-                rs->b = (int)rs->npfb;
+                b = (int)rs->npfb;
             }
             else
             {
-                y[n++] = rs->f_mix(rs, rs->b, rs->mu);
-                update_timing(rs);
+                y[n++] = rs->f_mix(rs, b, mu);
+                update_timing(rs, &tau, &bf, &b, &mu);
             }
         }
     }
 
-    rs->tau -= 1.0f;
-    rs->bf -= (float)rs->npfb;
-    rs->b -= (int)rs->npfb;
+    tau -= 1.0f;
+    bf -= (float)rs->npfb;
+    b -= (int)rs->npfb;
+    rs->tau = tau;
+    rs->bf = bf;
+    rs->b = b;
+    rs->mu = mu;
 
     return n;
 }
