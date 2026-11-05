@@ -102,6 +102,8 @@ def run_sweeps(args) -> list[dict]:
             "--jobs",
             str(args.jobs),
         ]
+        if args.batch > 1:
+            cmd += ["--batch", str(args.batch)]
         cmd += shlex.split(args.bin_args)
         print(f"=== SF{sf}: {' '.join(cmd[2:])}", file=sys.stderr, flush=True)
         cp = subprocess.run(cmd, capture_output=True, text=True)
@@ -196,6 +198,13 @@ def main() -> None:
     p.add_argument("--cr", type=int, default=1, choices=(1, 2, 3, 4), help="coding rate 4/(4+cr)")
     p.add_argument("--pl", type=int, default=8, help="payload length in bytes")
     p.add_argument("--jobs", type=int, default=1, help="worker processes per sweep")
+    p.add_argument(
+        "--batch",
+        type=int,
+        default=1,
+        help="frames per binary run inside each sweep (ber.py --batch); "
+        "> 1 runs one launch per SNR point instead of per trial",
+    )
     p.add_argument(
         "--bin-args",
         default="",

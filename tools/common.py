@@ -45,22 +45,30 @@ def lo(sf: int, oversampling: int) -> np.ndarray:
     return np.conj(upchirp(0, sf, oversampling)[::oversampling][:n])
 
 
-def add_awgn(x: np.ndarray, snr_db: float, rng: np.random.Generator) -> np.ndarray:
-    """Complex AWGN at the per-complex-sample SNR: 10*log10(mean|x|^2 / E|n|^2).
+def awgn_sigma(x: np.ndarray, snr_db: float) -> np.float32:
+    """Complex-AWGN sigma at the per-complex-sample SNR: 10*log10(mean|x|^2 / E|n|^2)."""
+    return np.float32(np.sqrt(float(np.vdot(x, x).real) / x.size * 10 ** (-snr_db / 10) / 2))
 
-    Box-Muller over float32 uniforms: cos/sin of one angle make re and im
-    independent, and the draw stays a pure function of (seed, size), so a
-    --verdicts line does not move. The /2 is E|n|^2 = 2*sigma^2 for complex
-    normals; u1 keeps (0, 1] so log() stays finite.
+
+def gauss_complex(sigma: float, size: int, rng: np.random.Generator) -> np.ndarray:
+    """`size` complex N(0, sigma^2) samples: Box-Muller over float32 uniforms.
+
+    cos/sin of one angle make re and im independent, and the draw stays a pure
+    function of (rng state, size), so a --verdicts line does not move. u1 keeps
+    (0, 1] so log() stays finite.
     """
-    sigma = np.float32(np.sqrt(float(np.vdot(x, x).real) / x.size * 10 ** (-snr_db / 10) / 2))
-    u1 = 1.0 - rng.random(x.size, dtype=np.float32)
-    u2 = rng.random(x.size, dtype=np.float32)
+    u1 = 1.0 - rng.random(size, dtype=np.float32)
+    u2 = rng.random(size, dtype=np.float32)
     rad = np.sqrt(np.float32(-2.0) * np.log(u1))
     ang = np.float32(2.0 * np.pi) * u2
-    buf = np.empty(2 * x.size, dtype=np.float32)
+    buf = np.empty(2 * size, dtype=np.float32)
     buf[0::2] = rad * np.cos(ang)
     buf[1::2] = rad * np.sin(ang)
     noise = buf.view(np.complex64)
     noise *= sigma
-    return noise + x
+    return noise
+
+
+def add_awgn(x: np.ndarray, snr_db: float, rng: np.random.Generator) -> np.ndarray:
+    """Complex AWGN at the per-complex-sample SNR (sigma from x itself)."""
+    return gauss_complex(awgn_sigma(x, snr_db), x.size, rng) + x
