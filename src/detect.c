@@ -196,7 +196,6 @@ int frame_sync_detect_step(struct frame_sync *s, const float complex *in, int64_
         // state-deterministic, re-decimation reproduces them); the slots
         // past n_up_req are SYNC's
         s->symbol_cnt = 0;
-        s->additional_upchirps = 0;
         // the vote cannot miss: every entry is a valid bin, so some bin
         // always has a count
         s->k_hat =

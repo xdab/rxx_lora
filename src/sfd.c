@@ -192,23 +192,12 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
 /* Power spectrum (4N bins, zero-padded) of an already-decimated slot,
  * dechirped by ref (downchirp for upchirp slots, upchirp for the SFD's
  * downchirps). */
-// dechirp a slot/window by ref and pack into the split-field FFT input
-static void dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n)
-{
-    for (uint32_t j = 0; j < n; j++)
-    {
-        float complex v = x[j] * ref[j];
-        dst[j].r = crealf(v);
-        dst[j].i = cimagf(v);
-    }
-}
-
 static void sfd_slot_ref_fft(
     struct frame_sync *s, const float complex *dec, const float complex *ref, float *mag)
 {
     const uint32_t n = s->number_of_bins, n4 = 4u * n;
 
-    dechirp_pack(s->sfd.cx_in, dec, ref, n);
+    dsp_dechirp_pack(s->sfd.cx_in, dec, ref, n);
     memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < n4; i++)
@@ -228,7 +217,7 @@ static float sfd_lock(struct frame_sync *s, const float complex *in, int64_t off
     for (int i = 0; i < count; i++)
     {
         sfd_slot_dec(s, in, off + (int64_t)i * (int64_t)s->samples_per_symbol, s->sfd.slot);
-        dechirp_pack(s->sfd.cx_in + m, s->sfd.slot, s->downchirp, n);
+        dsp_dechirp_pack(s->sfd.cx_in + m, s->sfd.slot, s->downchirp, n);
         m += n;
     }
 
@@ -405,7 +394,7 @@ static float sfd_coh_pow(
     for (int i = 0; i < count; i++)
     {
         sfd_slot_dec(s, in, off + (int64_t)i * (int64_t)s->samples_per_symbol, s->sfd.slot);
-        dechirp_pack(s->sfd.coh_in + (size_t)i * n, s->sfd.slot, ref, n);
+        dsp_dechirp_pack(s->sfd.coh_in + (size_t)i * n, s->sfd.slot, ref, n);
     }
     memset(
         s->sfd.coh_in + (size_t)count * n,

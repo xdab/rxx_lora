@@ -66,6 +66,12 @@ void dc_block_init(struct dc_block *d, double rate_hz, double corner_hz);
 void dc_block_apply(struct dc_block *d, float complex *x, size_t n);
 
 /**
+ * @brief Dechirp @p n samples by @p ref and pack into the split-field FFT
+ *        input layout (dsp_cpx).
+ */
+void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n);
+
+/**
  * @brief Modified Bessel function of the first kind, order 0 — the Kaiser
  *        window's denominator and taper.
  */

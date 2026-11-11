@@ -109,6 +109,16 @@ static float sinc_pi(float x)
     return (float)(sinf(M_PI * x) / (M_PI * x));
 }
 
+void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n)
+{
+    for (uint32_t j = 0; j < n; j++)
+    {
+        float complex v = x[j] * ref[j];
+        dst[j].r = crealf(v);
+        dst[j].i = cimagf(v);
+    }
+}
+
 /* Power-series I0, shared by the ad-hoc window designers (frame_sync, sfd);
  * converges long before the Kaiser betas in use run out of float range. */
 float dsp_bessel_i0(float x)
