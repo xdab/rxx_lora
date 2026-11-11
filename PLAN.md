@@ -108,8 +108,22 @@ behavior of a binary that batches 1–3 change.
 - `main_rtl.c`: usage text says `-o` default 2, code sets 4. Preserved as
   found (behavior change deferred); pick one — text or code — from the
   verified live configuration.
-- Chase-II: the Tier-3 verdict (delete vs keep vs disable-when-off) is
-  pending its BER sweep; `hamming.c`'s alt/margin out-params hang on it.
+- Chase-II verdict: measured (MediumFast, paired seeds, 250 trials/point,
+  `--chase` vs base): BER 0.936→0.901 at −18 dB, 0.604→0.505 at −17,
+  0.192→0.156 at −16 — about 0.3 dB of knee for ~200 LoC. At the
+  campaign's exchange rate (0.2 dB ≈ 1000 LoC) that makes deletion a bad
+  trade: **keep `--chase`**. `hamming.c`'s alt/margin out-params stay with
+  it. A follow-up micro-item if wanted: skip the suspect computation when
+  chase is disabled.
+
+## Measured and rejected
+
+- `sfd_slot_dec` scalar FIR (the textbook form its edge loops already use)
+  instead of the whole-vector kernel: −55 LoC of the most intricate code,
+  but the paired callgrind run prices it at +167% Ir on the function
+  (os=2, 14.8→39.5M) and +280% (os=8, 31.6→120.1M) — +11.8% total Ir.
+  Overturns the performance campaigns; the SIMD interior stays. The
+  staging-span and padded-tap machinery it needs is load-bearing.
 
 ## A/B protocol for the batches
 
