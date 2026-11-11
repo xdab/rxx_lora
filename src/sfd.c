@@ -365,7 +365,7 @@ void sfd_free(struct frame_sync *s)
 /* Pairing identity: (u, d) resolve to (tau, f) with the N/2 ambiguity —
  * (tau, f) and (tau + N/2, f + N/2) give the same (u, d) — so the wrapped
  * representatives are at most two. */
-int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
+static int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
 {
     float tau0 = util_wrap(u - d, n) / 2.0f;
     const float raw_taus[SFD_MAX_TAU_REPS] = {tau0, tau0 - (float)n / 2.0f, tau0 + (float)n / 2.0f};
@@ -386,7 +386,7 @@ int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
 }
 
 /* Median power of a power spectrum; scratch (len floats) is reordered. */
-float sfd_median_power(float *scratch, const float *mag, uint32_t len)
+static float sfd_median_power(float *scratch, const float *mag, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
         scratch[i] = mag[i];
@@ -451,7 +451,7 @@ static float sfd_coh_pow(
  * terms are per-slot (different tones each). dn holds the down-ref spectra
  * (SFD_FINE_DN rows of 4N, row = slot + 9); sync_words[0] != 0 adds the
  * net-id terms. sigma2 is the representative's noise floor (per 4N-bin). */
-float sfd_shift_lam(
+static float sfd_shift_lam(
     struct frame_sync *s,
     const float complex *in,
     int64_t t_cand,
@@ -492,7 +492,7 @@ float sfd_shift_lam(
 
 /* Best candidate by lam; the margin over the best other through *margin.
  * Returns the winner's index. */
-int sfd_select(const struct sfd_cand *c, int n, float *margin)
+static int sfd_select(const struct sfd_cand *c, int n, float *margin)
 {
     int best = 0;
     float lam_best = -HUGE_VALF;

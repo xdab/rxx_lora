@@ -243,32 +243,6 @@ int sfd_alloc(struct frame_sync *s);
 /** @brief Release everything sfd_alloc() allocated. */
 void sfd_free(struct frame_sync *s);
 
-/** @brief Pairing identity: (u, d) -> the N/2-deduplicated tau representatives
- *        in @p taus. @return the representative count */
-int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS]);
-
-/** @brief Median power of a power spectrum; @p scratch (len floats) is
- *        reordered in place. */
-float sfd_median_power(float *scratch, const float *mag, uint32_t len);
-
-/** @brief Fine score of one slot shift: known-bin evidence in noise-power
- *        units. The preamble and SFD groups are scored coherently over the
- *        slots at @p t_cand + shift; @p dn holds the down-ref spectra
- *        (SFD_FINE_DN rows of 4N, row = slot + 9) for the net-id terms;
- *        sync_words[0] != 0 adds the net-id terms. */
-float sfd_shift_lam(
-    struct frame_sync *s,
-    const float complex *in,
-    int64_t t_cand,
-    int shift,
-    float u_r,
-    float sigma2,
-    const uint16_t *sync_words);
-
-/** @brief Best candidate by lam; the margin over the best other through
- *        @p margin. @return the winner's index */
-int sfd_select(const struct sfd_cand *c, int n, float *margin);
-
 /**
  * @brief The SFD-first coarse sync: locate the SFD, resolve the timing/CFO
  *        pair, score the re-timed grid.
