@@ -53,6 +53,17 @@ static int source_eof_pad(struct source *s, size_t need)
  * allocation failed (`err`). The final filter-tail samples of a finite
  * resampled stream are not driven out here; the zero pad covers the
  * look-ahead they would have filled. */
+
+// conj / dc-block pre-processing, applied in place on a fresh read
+static void apply_pre(struct source *s, float complex *x, size_t n)
+{
+    if (s->conj)
+        for (size_t i = 0; i < n; i++)
+            x[i] = conjf(x[i]);
+
+    if (s->dc_block_on)
+        dc_block_apply(&s->dc, x, n);
+}
 static int source_fill(struct source *s, size_t need)
 {
     if (s->err)
@@ -74,12 +85,7 @@ static int source_fill(struct source *s, size_t need)
             if (nr == 0)
                 return source_eof_pad(s, need);
 
-            if (s->conj)
-                for (size_t i = 0; i < nr; i++)
-                    in[i] = conjf(in[i]);
-
-            if (s->dc_block_on)
-                dc_block_apply(&s->dc, in, nr);
+            apply_pre(s, in, nr);
 
             size_t space = resampler_push_space(s->rs, nr) + 1;
             if (ring_reserve(s->ring, space) != 0)
@@ -106,12 +112,7 @@ static int source_fill(struct source *s, size_t need)
             if (nr == 0)
                 return source_eof_pad(s, need);
 
-            if (s->conj)
-                for (size_t i = 0; i < nr; i++)
-                    span[i] = conjf(span[i]);
-
-            if (s->dc_block_on)
-                dc_block_apply(&s->dc, span, nr);
+            apply_pre(s, span, nr);
 
             ring_commit(s->ring, nr);
         }

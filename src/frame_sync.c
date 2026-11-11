@@ -98,7 +98,7 @@ struct frame_sync *frame_sync_create(
         goto out;
     }
     memset(s->preamb_up_vals, 0, s->n_up_req * sizeof(*s->preamb_up_vals));
-    util_build_ref_chirps(s->upchirp, s->downchirp, spreading_factor, 1);
+    util_build_ref_chirps(s->upchirp, s->downchirp, spreading_factor);
 
     s->fft_cfg = dsp_fft_alloc((int)s->number_of_bins);
     if (!s->fft_cfg)

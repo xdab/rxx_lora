@@ -131,6 +131,29 @@ static int get_symbol_val_detect(
  * spectra, half-bin tie-break. */
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:505-539; [gr-lora] demod_impl.cc:247.
+// Most frequent value in vals (values in [0, number_of_bins)); hash is caller-
+// owned scratch of number_of_bins ints.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // n counts entries, bins sizes the histogram
+static int util_most_frequent(const int *arr, int n, uint32_t number_of_bins, int *hash)
+{
+    memset(hash, 0, number_of_bins * sizeof(*hash));
+
+    for (int i = 0; i < n; i++)
+        hash[arr[i]]++;
+
+    int max_count = 0, res = -1;
+    for (uint32_t i = 0; i < number_of_bins; i++)
+    {
+        if (max_count < hash[i])
+        {
+            res = (int)i;
+            max_count = hash[i];
+        }
+    }
+
+    return res;
+}
+
 int frame_sync_detect_step(struct frame_sync *s, const float complex *in, int64_t *advance)
 {
     *advance = 0;

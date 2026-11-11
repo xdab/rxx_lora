@@ -32,31 +32,21 @@ float util_wrap(float v, uint32_t n);
 int util_round(float number);
 
 /**
- * @brief Fill chirp with the oversampled upchirp of symbol value id
+ * @brief Fill chirp with the upchirp of symbol value id
  *        (phase-continuous closed-form quadratic phase).
  *
- * @param[out] chirp buffer of (1 << sf) * os_factor samples
+ * @param[out] chirp buffer of (1 << sf) samples
  *
  * Reference: [gr-lora_sdr] utilities.h:95; [gr-lora] demod_impl.cc:96-101.
  */
-void util_build_upchirp(float complex *chirp, uint32_t id, uint8_t sf, uint8_t os_factor);
+void util_build_upchirp(float complex *chirp, uint32_t id, uint8_t sf);
 
 /**
  * @brief Build the reference chirp pair: base upchirp plus its conjugate
- *        (the demodulation downchirp). Buffers of (1 << sf) * os_factor.
+ *        (the demodulation downchirp). Buffers of (1 << sf).
  *
  * Reference: [gr-lora_sdr] utilities.h:117; [gr-lora] demod_impl.cc:96-101.
  */
-void util_build_ref_chirps(
-    float complex *upchirp, float complex *downchirp, uint8_t sf, uint8_t os_factor);
-
-/**
- * @brief Most frequent value in arr (values in [0, number_of_bins)).
- *
- * `hash` is caller-owned scratch of number_of_bins ints.
- *
- * @return the mode
- */
-int util_most_frequent(const int *arr, int n, uint32_t number_of_bins, int *hash);
+void util_build_ref_chirps(float complex *upchirp, float complex *downchirp, uint8_t sf);
 
 #endif // UTILITIES_H

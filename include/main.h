@@ -17,7 +17,7 @@ static inline int digits_only(const char *s)
     return 1;
 }
 
-// -v/-v1/-v 1 and -q/-q1/-q 1: the shared tail of both binaries' option
+// -v/-v1/-v 1 and -q/-q1/-q 1: the shared tail of the live binaries' option
 // loops, with the optional level argument taken from the argv tail
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (opt, argc, argv) is getopt's shape
 static inline void log_verbosity_opt(int opt, int argc, char **argv)
@@ -30,6 +30,23 @@ static inline void log_verbosity_opt(int opt, int argc, char **argv)
     if (n < 1)
         n = 1;
     log_set_level(opt == 'v' ? LOG_INFO - (n > 2 ? 2 : n) : LOG_INFO + (n > 3 ? 3 : n));
+}
+
+// seconds from a decimal with an optional s/m/h suffix; -1 on a malformed
+// value (a bare number is already seconds). h=3600, m=60, s=1.
+static inline double parse_duration(const char *s)
+{
+    char *end;
+    double v = strtod(s, &end);
+    if (end == s || v < 0.0)
+        return -1.0;
+    if (*end == '\0' || ((*end == 's' || *end == 'S') && end[1] == '\0'))
+        return v;
+    if ((*end == 'm' || *end == 'M') && end[1] == '\0')
+        return v * 60.0;
+    if ((*end == 'h' || *end == 'H') && end[1] == '\0')
+        return v * 3600.0;
+    return -1.0;
 }
 
 #endif

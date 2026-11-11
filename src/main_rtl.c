@@ -67,23 +67,6 @@ static void usage(void)
                  "\n");
 }
 
-// seconds from a decimal with an optional s/m/h suffix; -1 on a malformed
-// value (a bare number is already seconds). h=3600, m=60, s=1.
-static double parse_duration(const char *s)
-{
-    char *end;
-    double v = strtod(s, &end);
-    if (end == s || v < 0.0)
-        return -1.0;
-    if (*end == '\0' || ((*end == 's' || *end == 'S') && end[1] == '\0'))
-        return v;
-    if ((*end == 'm' || *end == 'M') && end[1] == '\0')
-        return v * 60.0;
-    if ((*end == 'h' || *end == 'H') && end[1] == '\0')
-        return v * 3600.0;
-    return -1.0;
-}
-
 int main(int argc, char **argv)
 {
     // --- defaults ---

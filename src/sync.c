@@ -100,19 +100,12 @@ static float estimate_sto_frac(struct frame_sync *s)
         for (uint32_t j = 0; j < n; j++)
             s->est_dechirped[j] = s->preamble_upchirps[(uint32_t)n * i + j] * s->downchirp[j];
 
-        for (uint32_t j = 0; j < 2 * n; j++)
+        for (uint32_t j = 0; j < n; j++)
         {
-            if (j < n)
-            {
-                s->est_cx_in[j].r = crealf(s->est_dechirped[j]);
-                s->est_cx_in[j].i = cimagf(s->est_dechirped[j]);
-            }
-            else
-            {
-                s->est_cx_in[j].r = 0;
-                s->est_cx_in[j].i = 0;
-            }
+            s->est_cx_in[j].r = crealf(s->est_dechirped[j]);
+            s->est_cx_in[j].i = cimagf(s->est_dechirped[j]);
         }
+        memset(&s->est_cx_in[n], 0, n * sizeof(*s->est_cx_in));
 
         dsp_fft(s->est_fft_cfg, s->est_cx_in, s->est_cx_out);
 
