@@ -267,7 +267,7 @@ def record_meta(rec):
     }
 
 
-def feed(args, keys):
+def feed(args):
     """Yield one meta dict per decoded frame from rtl_lora's JSONL stdout.
 
     rtl_lora writes one JSON object per decoded frame to stdout; its
@@ -457,7 +457,7 @@ examples:
     if not args.no_db:
         NODES.update(load_db(args.db))
     try:
-        for pending in feed(args, keys):
+        for pending in feed(args):
             try:
                 emit(pending, keys, args.json, args.verbose)
             except BrokenPipeError:

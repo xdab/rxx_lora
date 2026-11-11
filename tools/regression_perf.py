@@ -154,7 +154,7 @@ def case_cmd(case: Case, bin_path: str, iq: str):
     ]
 
 
-def score(case: Case, out: str, truths):
+def score(out: str, truths):
     """Score the receiver's JSONL frame records exactly as regression.py does,
     one record per capture frame, each against its own truth payload."""
     recs = [json.loads(line) for line in out.splitlines() if line.strip()]
@@ -297,7 +297,7 @@ def main():
     p.add_argument(
         "--selftest",
         action="store_true",
-        help="a short 3-case run on small captures, exit 1 on any failure",
+        help="a short 2-case run on small captures, exit 1 on any failure",
     )
     args = p.parse_args()
     if not os.access(args.bin, os.X_OK):
@@ -347,7 +347,7 @@ def main():
             cmd = case_cmd(case, bin_path, iq)
             try:
                 best, med, out = timed_run(cmd, reps)
-                note = score(case, out, truths)
+                note = score(out, truths)
             except CaseFail as e:
                 n_fail += 1
                 print(f"FAIL  {case.label:<26} {'':>30}  {e.why}")

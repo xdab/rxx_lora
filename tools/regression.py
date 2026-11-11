@@ -181,16 +181,13 @@ def diff_note(truth, got):
 def bin_case(iq, bin_path, sf, truth, want_crc=True, **frame_args):
     """Generate a frame, decode it, score it; `frame_args` are Frame fields."""
     Frame(iq, sf=sf, **frame_args).run()
-    return score_bin(Receiver(bin_path=bin_path, iq=iq, sf=sf), truth, want_crc)
+    rx = Receiver(bin_path=bin_path, iq=iq, sf=sf)
+    return check_out(rx.run(verdict=True), rx.argv(), truth, want_crc)
 
 
 def parse_frames(stdout):
     """The JSONL frame records rtl_lora wrote to stdout."""
     return [json.loads(line) for line in stdout.splitlines() if line.strip()]
-
-
-def score_bin(rx, truth, want_crc=True):
-    return check_out(rx.run(verdict=True), rx.argv(), truth, want_crc)
 
 
 def check_out(cp, cmd, truth, want_crc=True):
@@ -364,6 +361,14 @@ def is_lfs_pointer(path):
         return f.read(45).startswith(b"version https://git-lfs.github.com")
 
 
+def require_capture(path, key):
+    """CaseSkip unless `key`'s capture file exists and is fetched."""
+    if not os.path.exists(path):
+        raise CaseSkip(f"{key} missing (is data/ checked out?)")
+    if is_lfs_pointer(path):
+        raise CaseSkip(f"{key} is an unfetched LFS pointer (git lfs pull)")
+
+
 def capture_receiver(bin_path, cap, src, netid=None):
     """Receiver configured for the committed captures."""
     return Receiver(
@@ -384,10 +389,7 @@ def capture_case(iq, bin_path, key, netid=None):
     """One committed frame; CRC valid is the whole verdict."""
     cap, name = key.split("/")
     src = os.path.join(ROOT, "data", cap, f"{name}.cf32")
-    if not os.path.exists(src):
-        raise CaseSkip(f"{key} missing (is data/ checked out?)")
-    if is_lfs_pointer(src):
-        raise CaseSkip(f"{key} is an unfetched LFS pointer (git lfs pull)")
+    require_capture(src, key)
 
     rx = capture_receiver(bin_path, cap, src, netid)
     cp = rx.run(verdict=True)
@@ -408,20 +410,12 @@ def stream_case(iq, bin_path, cap, netid=None):
     committed all_frames.cf32; the others are concatenated here."""
     if cap == "capture3":
         src = os.path.join(ROOT, "data", "capture3", "all_frames.cf32")
-        if not os.path.exists(src):
-            raise CaseSkip("capture3/all_frames.cf32 missing (is data/ checked out?)")
-        if is_lfs_pointer(src):
-            raise CaseSkip("capture3/all_frames.cf32 is an unfetched LFS pointer (git lfs pull)")
+        require_capture(src, "capture3/all_frames.cf32")
     else:
         names = [f"frame{i}" for i in range(CAP_FRAMES[cap])]
         srcs = [os.path.join(ROOT, "data", cap, n + ".cf32") for n in names]
         for p in srcs:
-            if not os.path.exists(p):
-                raise CaseSkip(f"{cap}/{os.path.basename(p)} missing (is data/ checked out?)")
-            if is_lfs_pointer(p):
-                raise CaseSkip(
-                    f"{cap}/{os.path.basename(p)} is an unfetched LFS pointer (git lfs pull)"
-                )
+            require_capture(p, f"{cap}/{os.path.basename(p)}")
         native = iq + ".native"
         with open(native, "wb") as out:
             for p in srcs:
@@ -467,7 +461,11 @@ def main():
     )
     p.add_argument("--only", metavar="SUBSTR", help="run only cases whose label contains SUBSTR")
     p.add_argument("--list", action="store_true", help="print the matrix, unrun")
-    p.add_argument("--no-capture", action="store_true", help="drop section 3 (needs numpy+scipy)")
+    p.add_argument(
+        "--no-capture",
+        action="store_true",
+        help="drop section 3 (the capture cases; AWGN still needs numpy)",
+    )
     p.add_argument(
         "--per-frame",
         action="store_true",

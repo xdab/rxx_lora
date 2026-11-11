@@ -177,6 +177,18 @@ def ref_upchirp(symbol: int, sf: int, oversampling: int) -> np.ndarray:
     return y
 
 
+def _frame_head(pre: int, sync: list[int], sf: int, os: int) -> list[np.ndarray]:
+    """Preamble + sync + SFD (2.25 downchirps = conj of the s=0 upchirp),
+    the part both frame builders share."""
+    sps = (1 << sf) * os
+    up0 = ref_upchirp(0, sf, os)
+    down = np.conj(up0)
+    parts = [up0] * pre
+    parts += [ref_upchirp(s, sf, os) for s in sync]
+    parts += [down, down, down[: sps // 4]]  # 2.25 downchirps
+    return parts
+
+
 def build_frame(pre: int, sync: list[int], payload: list[int], sf: int, os: int) -> np.ndarray:
     """Concatenate the frame elements; return the complex baseband samples.
 
@@ -184,13 +196,8 @@ def build_frame(pre: int, sync: list[int], payload: list[int], sf: int, os: int)
     (modulate_impl.cc:172-174), payload symbols as s+1, which the
     demodulator's mod(sym-1, N) undoes (fft_demod_impl.cc:301).
     """
-    sps = (1 << sf) * os
     n = 1 << sf
-    up0 = ref_upchirp(0, sf, os)
-    down = np.conj(up0)  # SFD flavor: conjugate of the same up-chirp
-    parts = [up0] * pre
-    parts += [ref_upchirp(s, sf, os) for s in sync]
-    parts += [down, down, down[: sps // 4]]  # 2.25 downchirps
+    parts = _frame_head(pre, sync, sf, os)
     parts += [ref_upchirp((s + 1) % n, sf, os) for s in payload]
     return np.concatenate(parts)
 
@@ -201,13 +208,8 @@ def build_frame_coded(
     """Full TX chain frame (gr-lora_sdr TX flowgraph): hamming_enc ->
     interleaver -> gray_demap -> upchirp modulation over coded_nibbles().
     Returns (samples, number of payload-area symbols)."""
-    sps = (1 << sf) * os
-    up0 = ref_upchirp(0, sf, os)
-    down = np.conj(up0)  # SFD flavor: conjugate of the same up-chirp
     syms = interleave(hamming_encode_stream(coded_nibbles(msg, cr, has_crc), sf, cr), sf, cr)
-    parts = [up0] * pre
-    parts += [ref_upchirp(s, sf, os) for s in sync]
-    parts += [down, down, down[: sps // 4]]  # 2.25 downchirps
+    parts = _frame_head(pre, sync, sf, os)
     parts += [ref_upchirp(gray_demap_sym(v, sf), sf, os) for v in syms]
     return np.concatenate(parts), len(syms)
 

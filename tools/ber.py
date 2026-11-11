@@ -155,8 +155,8 @@ def main() -> None:
             "payload bytes, read byte-exactly from the receiver's 'RX:' line "
             "with the CRC verdict beside it (PER = lost frames); a lost frame "
             "counts every payload bit wrong.\n"
-            "Zero-power leading zeros (--sto) dilute awgn's file-average power "
-            "estimate by up to ~0.3 dB — an accepted bias."
+            "Zero-power leading zeros (--sto-max) dilute awgn's file-average "
+            "power estimate by up to ~0.3 dB — an accepted bias."
         ),
     )
     p.add_argument("--sf", type=int, default=7, help="spreading factor (7..12)")
@@ -182,17 +182,12 @@ def main() -> None:
         "the summary and the --verdicts lines are identical either way)",
     )
     p.add_argument(
-        "--sto-max",
-        type=int,
-        default=None,
-        dest="sto_max",
-        help="max STO in samples (default: one symbol window)",
+        "--sto-max", type=int, default=None, help="max STO in samples (default: one symbol window)"
     )
     p.add_argument(
         "--cfo-max",
         type=float,
         default=None,
-        dest="cfo_max",
         help="max |CFO| in FFT bins, overriding the crystal model below",
     )
     p.add_argument(
@@ -208,7 +203,6 @@ def main() -> None:
         "--center-hz",
         type=float,
         default=868e6,
-        dest="center_hz",
         help="carrier the ppm figure refers to; the product is what matters",
     )
     p.add_argument(
@@ -219,7 +213,7 @@ def main() -> None:
         help="coding rate 4/(4+cr): explicit header, CRC on. End-to-end "
         "information BER over the dewhitened payload bytes",
     )
-    p.add_argument("--pl", type=int, default=8, dest="pl", help="payload length in bytes (2..255)")
+    p.add_argument("--pl", type=int, default=8, help="payload length in bytes (2..255)")
     p.add_argument(
         "--netid",
         default="0x12",
@@ -272,7 +266,7 @@ def main() -> None:
     p.add_argument(
         "--selftest",
         action="store_true",
-        help="fixed trial(s) at the regression parameters, exit 1 on mismatch",
+        help="fixed trial at the regression parameters, exit 1 on mismatch",
     )
     args = p.parse_args()
 

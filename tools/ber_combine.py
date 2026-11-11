@@ -94,6 +94,18 @@ def curve(ax, d, color, label, metric, lw=None):
     return y_all[~zero]
 
 
+def fit_xlim(ax, sweeps, metric="ber"):
+    """X axis fits the measured points, not the swept range: past the last
+    observed error there is nothing to show but empty space. A sweep with no
+    errors anywhere contributes no drawn point: fall back to its full swept
+    range so the limits stay finite."""
+    lo = min(s["snr"].min() for s in sweeps)
+    ends = [s["snr"][s[metric] > 0] for s in sweeps]
+    hi = max((e[-1] if len(e) else s["snr"].max()) for e, s in zip(ends, sweeps))
+    pad = 0.04 * (hi - lo)
+    ax.set_xlim(lo - pad, hi + pad)
+
+
 def main():
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -153,13 +165,12 @@ def main():
     # the color key: SF, or coded payload length in bytes
     key = (lambda d: d["sf"]) if args.color_by == "sf" else (lambda d: d["pl"])
     keys = sorted({key(d) for d in sweeps})
-    lows, ends = [], []
+    lows = []
     for i, (d, path) in enumerate(zip(sweeps, args.logs)):
         color = colors[i] if (args.by_file or many) else colors[keys.index(key(d)) % len(colors)]
         cfg = d["cfg"].replace(",", "").strip()
         tag = f"{os.path.splitext(os.path.basename(path))[0]}: " if args.by_file else ""
         lows.append(curve(ax, d, color, f"{tag}SF{d['sf']} {cfg}", metric, lw))
-        ends.append(d["snr"][d[metric] > 0])
 
     d0 = sweeps[0]
     params = f"os={d0['os']}, pre={d0['pre']}, {d0['trials']} trials/point"
@@ -174,14 +185,7 @@ def main():
         "curves stop at the last point with an observed error",
         fontsize=10,
     )
-    # axes fit the plotted points, not the swept range: past the last
-    # observed error there is nothing to show but empty space
-    lo = min(s["snr"].min() for s in sweeps)
-    # a sweep with no errors anywhere contributes no drawn point: fall back
-    # to its full swept range so the limits stay finite
-    hi = max((e[-1] if len(e) else s["snr"].max()) for e, s in zip(ends, sweeps))
-    pad = 0.04 * (hi - lo)
-    ax.set_xlim(lo - pad, hi + pad)
+    fit_xlim(ax, sweeps, metric)
     drawn = [l for l in lows if len(l)]
     top = 1.1 if args.per else 3
     ax.set_ylim(min(l.min() for l in drawn) / 4 if drawn else 1e-4, top)
