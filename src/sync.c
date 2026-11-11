@@ -325,17 +325,23 @@ static void decode_netid_pair(struct frame_sync *s, int cfo_int)
     }
 
     s->netid_dec[0] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[0], s->downchirp);
-    s->netid_dec[1] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[n], s->downchirp);
 
-    // the top-k scan and its spectra feed the worded-mode joint arbitration
-    // (and one debug line); accept-any reads only the argmax pair above
+    // the top-k scan feeds the worded-mode joint arbitration; accept-any
+    // reads only the argmax pair above. get_symbol_val leaves the scanned
+    // spectrum in fft_mag, so spectrum 0 must be scanned before symbol 1
+    // is demodulated into it
     int bins0[NETID_JOINT_K], bins1[NETID_JOINT_K];
     float mags0[NETID_JOINT_K], mags1[NETID_JOINT_K];
     float mean0 = 0.0f, mean1 = 0.0f;
     int nb0 = 0, nb1 = 0;
-    if (s->sync_words[0] != 0 && s->sync_words[1] != 0)
-    {
+    int worded = s->sync_words[0] != 0 && s->sync_words[1] != 0;
+    if (worded)
         nb0 = netid_top_tones(s, NETID_JOINT_K, bins0, mags0, &mean0);
+
+    s->netid_dec[1] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[n], s->downchirp);
+
+    if (worded)
+    {
         nb1 = netid_top_tones(s, NETID_JOINT_K, bins1, mags1, &mean1);
         log_debug(
             "netid spec1: %d (%.0f), %d (%.0f), mean %.1f | "
@@ -352,8 +358,8 @@ static void decode_netid_pair(struct frame_sync *s, int cfo_int)
             mean1);
     }
 
-    if (s->sync_words[0] != 0 && s->sync_words[1] != 0)
-    { /* worded mode: joint pair arbitration, argmax pair as fallback */
+    if (worded)
+    { /* joint pair arbitration, argmax pair as fallback */
         int best0 = -1, best1 = -1, arg0 = -1, arg1 = -1;
         float best_p = -1.0f, best_m0 = 0.0f, best_m1 = 0.0f;
         for (int i = 0; i < nb0; i++)
