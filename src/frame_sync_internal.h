@@ -154,7 +154,6 @@ struct frame_sync
     float complex *net_id_samp;       // 2.5-symbol scratch around the sync word
     float complex *preamble_upchirps; // CFO-corrected preamble copy
     float complex *cfo_correc;        // N-point CFO correction vector
-    float complex *cfo_correc_aug;    // long correction vector (Bernier stage)
     float complex *cfo_correc_long;   // long correction vector (post-SFD stage)
     float complex *sfo_corr_vect;     // SFO correction vector
     float complex *net_ids_samp_dec;  // decimated net-id pair, 2N
@@ -230,11 +229,8 @@ void frame_sync_downsample_prologue(
 /**
  * @brief Bernier fractional-CFO estimator over the buffered preamble run.
  *
- * Shared with detect.c: the DETECT->SYNC look-ahead rotates its scanned
- * windows by the estimate before deciding the symbol grid. Side effects (the
- * fractional-CFO-corrected copy in s->preamble_upchirps and the long phasor
- * in s->cfo_correc_aug) are exactly what the SYNC walk's own first-step call
- * produces on the same data.
+ * Also fills s->preamble_upchirps with the fractional-CFO-corrected copy the
+ * SYNC walk consumes next.
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:194.
  */

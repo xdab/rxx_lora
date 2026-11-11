@@ -525,11 +525,7 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
 // Report one completed frame: the human verdict on stderr, one JSON line on
 // stdout. crc_valid carries the verdict: 1 valid, 0 invalid, -1 absent.
 static void report_frame(
-    const struct frame_result *res,
-    enum frame_decode verdict,
-    const struct frame_sync_status *st,
-    struct source *src,
-    size_t pos)
+    const struct frame_result *res, enum frame_decode verdict, const struct frame_sync_status *st)
 {
     char b64[384] = {0}; // max 341 used
     struct output_record rec = {0};
@@ -537,17 +533,9 @@ static void report_frame(
     rec.packet = res->bytes;
     rec.len = res->len;
     rec.snr_db = res->snr_db;
-    rec.cr = res->cr;
     rec.crc_present = res->has_crc;
     rec.crc_valid = verdict == DECODE_CRC_OK ? 1 : (verdict == DECODE_CRC_BAD ? 0 : -1);
-    rec.net0 = st->netid_dec[0];
-    rec.net1 = st->netid_dec[1];
-    rec.sync_word = st->sync_word_rx;
     rec.cfo_hz = (double)st->cfo * st->bandwidth / (double)st->number_of_bins;
-    rec.sfo = (double)st->sfo_hat;
-    rec.sto_frac = (double)st->sto_frac;
-    rec.input_sample = source_input_sample(src, pos);
-    rec.time_seconds = source_time_seconds(src, pos);
 
     if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) == 0)
         log_info("RX: %s\n", b64);
@@ -618,7 +606,6 @@ int receiver_run(struct receiver *r, struct source *src)
     frame_sync_status(fs, &st); // one snapshot, refreshed after every step below
 
     size_t pos = 0;
-    size_t lock_pos = 0; // frame start: where DETECT fired
     size_t fire_pos = 0; // the fire window itself, before the coarse jump
     for (;;)
     {
@@ -630,7 +617,6 @@ int receiver_run(struct receiver *r, struct source *src)
         if (!detected)
             break; // end of stream: nothing more to hunt
         n_locks++;
-        lock_pos = pos;
 
         if (sync_frame(src, fs, &pos, &st))
         {
@@ -645,17 +631,17 @@ int receiver_run(struct receiver *r, struct source *src)
             case DECODE_CRC_OK:
                 n_crc_ok++;
                 n_decoded++;
-                report_frame(&res, verdict, &st, src, lock_pos);
+                report_frame(&res, verdict, &st);
                 break;
             case DECODE_NO_CRC:
                 n_crc_absent++;
                 n_decoded++;
-                report_frame(&res, verdict, &st, src, lock_pos);
+                report_frame(&res, verdict, &st);
                 break;
             case DECODE_CRC_BAD:
                 n_crc_bad++;
                 if (r->report_crc_bad)
-                    report_frame(&res, verdict, &st, src, lock_pos);
+                    report_frame(&res, verdict, &st);
                 break;
             case DECODE_HEADER:
                 n_header_fail++;

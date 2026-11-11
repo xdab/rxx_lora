@@ -246,18 +246,6 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
         n);
 }
 
-/* Modified Bessel I0, the kaiser window's denominator. */
-static float sfd_bessel_i0(float x)
-{
-    float sum = 1.0f, term = 1.0f;
-    for (int i = 1; i < 40; i++)
-    {
-        term *= (x / (2.0f * (float)i)) * (x / (2.0f * (float)i));
-        sum += term;
-    }
-    return sum;
-}
-
 int sfd_alloc(struct frame_sync *s)
 {
     struct sfd *f = &s->sfd;
@@ -306,13 +294,13 @@ int sfd_alloc(struct frame_sync *s)
     {
         const unsigned nt = 15, mid = nt / 2;
         f->fir_n = nt;
-        const float beta = 5.7f, i0b = sfd_bessel_i0(beta);
+        const float beta = 5.7f, i0b = dsp_bessel_i0(beta);
         for (unsigned t = 0; t < nt; t++)
         {
             float x = 0.5f * (float)((int)t - (int)mid);
             float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
             float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
-            float w = sfd_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
+            float w = dsp_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
             f->fir[t] = 0.5f * sinc * w;
             sum += f->fir[t];
         }

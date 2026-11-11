@@ -69,8 +69,6 @@ struct frame_sync *frame_sync_create(
     s->preamble_upchirps =
         malloc((size_t)preamble_len * s->number_of_bins * sizeof(*s->preamble_upchirps));
     s->cfo_correc = malloc(s->number_of_bins * sizeof(*s->cfo_correc));
-    s->cfo_correc_aug =
-        malloc((size_t)s->n_up_req * s->number_of_bins * sizeof(*s->cfo_correc_aug));
     s->symb_corr = malloc(s->number_of_bins * sizeof(*s->symb_corr));
     s->est_dechirped = malloc(s->number_of_bins * sizeof(*s->est_dechirped));
     s->est_cx_in = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_cx_in));
@@ -91,7 +89,7 @@ struct frame_sync *frame_sync_create(
     if (!s->preamb_up_vals || !s->mode_hash || !s->upchirp || !s->downchirp || !s->in_down ||
         !s->out_win || !s->preamble_raw || !s->net_id_samp || !s->cfo_correc_long ||
         !s->sfo_corr_vect || !s->net_ids_samp_dec || !s->rot_tmp || !s->preamble_upchirps ||
-        !s->cfo_correc || !s->cfo_correc_aug || !s->symb_corr || !s->est_dechirped ||
+        !s->cfo_correc || !s->symb_corr || !s->est_dechirped ||
         !s->est_cx_in || !s->est_cx_out || !s->est_fft_mag || !s->est_fft_val || !s->est_k0 ||
         !s->est_k0_mag || !s->cx_in || !s->cx_out || !s->fft_mag ||
         (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_sum)))
@@ -147,7 +145,6 @@ static void frame_sync_cleanup(struct frame_sync *s)
     free(s->rot_tmp);
     free(s->preamble_upchirps);
     free(s->cfo_correc);
-    free(s->cfo_correc_aug);
     free(s->symb_corr);
     free(s->est_dechirped);
     free(s->est_cx_in);
@@ -228,22 +225,6 @@ static unsigned frac_gather_m(void)
 #endif
 }
 
-static float bessel_i0(float x)
-{
-    /* Power series; converges long before the Kaiser betas in use run out
-     * of float range. */
-    float sum = 1.0f, term = 1.0f;
-    for (int k = 1; k < 24; k++)
-    {
-        float half = x / (2.0f * (float)k);
-        term *= half * half;
-        sum += term;
-        if (term < 1e-9f * sum)
-            break;
-    }
-    return sum;
-}
-
 // a gather is directional (dst <- in); the geometry quadruple is inherent
 void frame_sync_frac_gather(
     float complex *dst,
@@ -272,14 +253,14 @@ void frame_sync_frac_gather(
      * output (stride is an integer), only the integer part advances. */
     float w[16];
     float beta = 5.6536f; // 60 dB stopband, the house resampler's as=60
-    float ib = bessel_i0(beta);
+    float ib = dsp_bessel_i0(beta);
     float wsum = 0.0f;
     for (unsigned j = 0; j < 2 * m; j++)
     {
         float d = (float)((int)j - (int)m + 1) - f; // tap - base
         float sinc = fabsf(d) < 1e-7f ? 1.0f : sinf((float)M_PI * d) / ((float)M_PI * d);
         float x = 2.0f * (float)j / (float)(2 * m - 1) - 1.0f;
-        w[j] = sinc * bessel_i0(beta * sqrtf(1.0f - x * x)) / ib;
+        w[j] = sinc * dsp_bessel_i0(beta * sqrtf(1.0f - x * x)) / ib;
         wsum += w[j];
     }
     for (unsigned j = 0; j < 2 * m; j++)

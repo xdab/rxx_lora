@@ -41,42 +41,18 @@ static void vlog(enum log_level lvl, const char *fmt, va_list ap)
 
 void log_set_level(enum log_level level) { threshold = level; }
 
-void log_trace(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(LOG_TRACE, fmt, ap);
-    va_end(ap);
-}
+// The five wrappers differ only in level (see logging.h for the contract).
+#define LOG_FN(name, lvl)             \
+    void name(const char *fmt, ...)   \
+    {                                 \
+        va_list ap;                   \
+        va_start(ap, fmt);            \
+        vlog(lvl, fmt, ap);           \
+        va_end(ap);                   \
+    }
 
-void log_debug(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(LOG_DEBUG, fmt, ap);
-    va_end(ap);
-}
-
-void log_info(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(LOG_INFO, fmt, ap);
-    va_end(ap);
-}
-
-void log_warn(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(LOG_WARN, fmt, ap);
-    va_end(ap);
-}
-
-void log_error(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(LOG_ERROR, fmt, ap);
-    va_end(ap);
-}
+LOG_FN(log_trace, LOG_TRACE)
+LOG_FN(log_debug, LOG_DEBUG)
+LOG_FN(log_info, LOG_INFO)
+LOG_FN(log_warn, LOG_WARN)
+LOG_FN(log_error, LOG_ERROR)

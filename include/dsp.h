@@ -66,6 +66,12 @@ void dc_block_init(struct dc_block *d, double rate_hz, double corner_hz);
 void dc_block_apply(struct dc_block *d, float complex *x, size_t n);
 
 /**
+ * @brief Modified Bessel function of the first kind, order 0 — the Kaiser
+ *        window's denominator and taper.
+ */
+float dsp_bessel_i0(float x);
+
+/**
  * @brief Design an @p n-tap Kaiser-windowed sinc low-pass prototype, writing
  *        @p n coefficients to @p h (unnormalized; the caller applies any gain).
  *

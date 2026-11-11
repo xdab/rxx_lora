@@ -109,6 +109,22 @@ static float sinc_pi(float x)
     return (float)(sinf(M_PI * x) / (M_PI * x));
 }
 
+/* Power-series I0, shared by the ad-hoc window designers (frame_sync, sfd);
+ * converges long before the Kaiser betas in use run out of float range. */
+float dsp_bessel_i0(float x)
+{
+    float sum = 1.0f, term = 1.0f;
+    for (int k = 1; k < 24; k++)
+    {
+        float half = x / (2.0f * (float)k);
+        term *= half * half;
+        sum += term;
+        if (term < 1e-9f * sum)
+            break;
+    }
+    return sum;
+}
+
 // Kaiser taper parameter for a target stop-band attenuation (Kaiser:1974)
 static float kaiser_beta(float as)
 {

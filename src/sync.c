@@ -79,12 +79,9 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
     {
         if ((j & (PHASOR_RESYNC - 1)) == 0)
             z = cexpf(I * (-2.0f * (float)M_PI * cfo_frac / (float)n * (float)j));
-        s->cfo_correc_aug[j] = z;
+        s->preamble_upchirps[j] = samples[j] * z;
         z *= step;
     }
-
-    for (uint32_t j = 0; j < (uint32_t)ust * n; j++)
-        s->preamble_upchirps[j] = samples[j] * s->cfo_correc_aug[j];
 
     return cfo_frac;
 }
