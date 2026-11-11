@@ -88,7 +88,7 @@ def run_trial(
         sf=args.sf,
         os_=args.os,
         pre=args.pre,
-        sync=[8, 16],
+        sync=frame_mod.netid_syms(int(args.netid, 0)),
         msg=truth,
         cr=args.cr,
         has_crc=True,
@@ -223,8 +223,9 @@ def main() -> None:
     p.add_argument(
         "--netid",
         default="0x12",
-        help="sync word passed to the binary as -w: the netid these frames "
-        "carry (sync=[8,16]). The netid check is where the receiver calibrates "
+        help="sync word the frames carry and the binary filters by -w: "
+        "mapped to the two netid symbols nibble*8 (frame.netid_syms, "
+        "0x12 -> [8,16]). The netid check is where the receiver calibrates "
         "its payload grid (sync.c net_id_off); 0 = no check, no calibration, "
         "and the coarse sync's chip error back in the curve",
     )

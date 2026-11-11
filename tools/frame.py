@@ -296,6 +296,17 @@ def plot_frame(
     print(f"wrote {path}")
 
 
+def netid_syms(word: int) -> list[int]:
+    """The two network-id symbols a sync-word byte transmits as.
+
+    Each nibble goes out as symbol nibble*8 (high nibble first), the
+    convention the receiver inverts in sync.c (netid_dec/8 -> sync_word_rx):
+    0x12 -> [8, 16] (private), 0x2b -> [16, 88] (Meshtastic)."""
+    if not 0 <= word <= 0xFF:
+        raise ValueError(f"sync word {word:#x} out of range 0..0xFF")
+    return [((word >> 4) & 0xF) * 8, (word & 0xF) * 8]
+
+
 def generate(
     sf: int,
     os_: int,

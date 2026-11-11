@@ -20,8 +20,11 @@ Unless asked otherwise, sweep the Meshtastic MediumFast preset:
 --sf 9 --bw 250000 --os 2 --cr 1 --netid 0x2b --center-hz 869.525e6
 ```
 
-CR 4/5 is `--cr 1` (the scale is `4/(4+cr)`); `--netid` is passed through to
-the binary as `-w`, hex string verbatim. `--center-hz` only feeds the crystal
+CR 4/5 is `--cr 1` (the scale is `4/(4+cr)`); `--netid` is the sync word the
+frames carry (mapped to the two netid symbols by `frame.netid_syms`,
+nibble*8) and the binary filters by as `-w`, hex string verbatim — the two
+always match, so a `--netid` the frames don't carry cannot happen.
+`--center-hz` only feeds the crystal
 error model (`--ppm`); it does not tune anything. The default window is
 `--snr-min -21 --snr-max -14 --snr-step 1`. 250 trials per point is the
 default depth; go lower only while probing (below), higher when asked or when
