@@ -243,9 +243,7 @@ struct device *device_open_rtl(
     if (!s->st.ring || !s->conv)
     {
         log_error("out of memory buffering the RTL stream\n");
-        rtl_free(s);
-        rtlsdr_close(dev);
-        return NULL;
+        goto fail;
     }
 
     if (record_path)
@@ -254,9 +252,7 @@ struct device *device_open_rtl(
         if (!s->record)
         {
             log_error("cannot open %s for IQ recording\n", record_path);
-            rtl_free(s);
-            rtlsdr_close(dev);
-            return NULL;
+            goto fail;
         }
     }
 
@@ -270,11 +266,7 @@ struct device *device_open_rtl(
     if (!s->reader_started)
     {
         log_error("cannot start the RTL reader thread\n");
-        if (s->record)
-            (void)fclose(s->record);
-        rtl_free(s);
-        rtlsdr_close(dev);
-        return NULL;
+        goto fail;
     }
 
     log_info(
@@ -285,4 +277,9 @@ struct device *device_open_rtl(
         center_hz / 1e6);
 
     return &s->base;
+
+fail:
+    rtl_free(s);
+    rtlsdr_close(dev);
+    return NULL;
 }

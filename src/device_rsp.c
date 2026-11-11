@@ -334,6 +334,8 @@ struct device *device_open_rsp(
     struct rsp_device *s = calloc(1, sizeof(*s));
     if (!s)
         return NULL;
+    pthread_mutex_init(&s->st.lock, NULL);
+    pthread_cond_init(&s->st.cond, NULL);
 
     if (rsp_api_open(s) != 0 || rsp_select(s, selector ? selector : "0") != 0)
         goto fail;
@@ -397,8 +399,6 @@ struct device *device_open_rsp(
         ch->ctrlParams.decimation.wideBandSignal = 0;
     }
 
-    pthread_mutex_init(&s->st.lock, NULL);
-    pthread_cond_init(&s->st.cond, NULL);
     s->st.ring_cap = (size_t)(rate * RSP_RING_SECONDS);
     s->st.ring = ring_create(1 << 16, s->st.ring_cap);
     s->conv = malloc(RSP_CONV_SAMPLES * sizeof(*s->conv));
@@ -455,9 +455,6 @@ fail:
         (void)sdrplay_api_ReleaseDevice(&s->info);
     if (s->api_open)
         (void)sdrplay_api_Close();
-    if (s->st.ring || s->conv) // ring/conv allocs imply the mutex/cond exist
-        rsp_free(s);
-    else
-        free(s);
+    rsp_free(s);
     return NULL;
 }
