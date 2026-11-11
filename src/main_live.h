@@ -35,7 +35,7 @@ enum
     OPT_REPORT_BAD,
 };
 
-static void live_on_signal(int sig)
+static inline void live_on_signal(int sig)
 {
     if (sig == SIGALRM)
         g_timeout = 1;
@@ -109,7 +109,7 @@ static inline int live_opt(int opt, struct live_opts *o)
 
 // Validate the shared options; prints the problem and returns nonzero on the
 // first one. @p app names the device in the center-freq message.
-static int live_opts_check(const struct live_opts *o, const char *app)
+static inline int live_opts_check(const struct live_opts *o, const char *app)
 {
     if (o->preamble_avg >= 6 && o->sf >= 5 && o->sf <= 12 && o->os >= 2 && o->os <= 255 &&
         o->detect_avg >= 1 && o->detect_avg <= 255 && o->sync_word_filter >= 0 &&
@@ -131,14 +131,14 @@ static inline void live_opts_default(struct live_opts *o)
         o->capture_rate = o->bandwidth * (double)o->os;
 }
 
-static void live_signal_setup(void)
+static inline void live_signal_setup(void)
 {
     (void)signal(SIGINT, live_on_signal);
     (void)signal(SIGTERM, live_on_signal);
 }
 
 // route the -x budget through the same clean stop as Ctrl-C (device_stop)
-static void live_timer_arm(double timeout_s)
+static inline void live_timer_arm(double timeout_s)
 {
     if (timeout_s <= 0.0)
         return;
@@ -155,7 +155,7 @@ static void live_timer_arm(double timeout_s)
     setitimer(ITIMER_REAL, &it, NULL);
 }
 
-static void live_timer_disarm(double timeout_s)
+static inline void live_timer_disarm(double timeout_s)
 {
     if (timeout_s > 0.0)
     {
@@ -166,7 +166,7 @@ static void live_timer_disarm(double timeout_s)
         log_info("duration reached (%.1f s), stopping\n", timeout_s);
 }
 
-static void live_record_note(const struct live_opts *o)
+static inline void live_record_note(const struct live_opts *o)
 {
     if (!o->record_path)
         return;
@@ -185,7 +185,7 @@ static void live_record_note(const struct live_opts *o)
 }
 
 // the receiver from the shared options; NULL on failure
-static struct receiver *live_receiver_create(const struct live_opts *o)
+static inline struct receiver *live_receiver_create(const struct live_opts *o)
 {
     struct receiver_config cfg = {
         .sf = o->sf,
@@ -201,7 +201,7 @@ static struct receiver *live_receiver_create(const struct live_opts *o)
     return receiver_create(&cfg);
 }
 
-static void live_tail(const struct live_opts *o)
+static inline void live_tail(const struct live_opts *o)
 {
     log_info(
         "%s: SF=%d os=%d pre=%d avg=%d  center %.6f MHz bw %.0f kHz\n",
@@ -226,13 +226,12 @@ static void live_tail(const struct live_opts *o)
 
     if (o->chase.enabled)
         log_info("chase-II retry on\n");
-
-    log_info("listening... (Ctrl-C to stop)\n");
 }
 
 // run the receiver and tear everything down; the process exit code
-static int live_run(struct receiver *rx, struct source *src, const struct live_opts *o)
+static inline int live_run(struct receiver *rx, struct source *src, const struct live_opts *o)
 {
+    log_info("listening... (Ctrl-C to stop)\n");
     int n_decoded = receiver_run(rx, src);
     int failed = source_failed(src);
 

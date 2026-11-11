@@ -1,17 +1,17 @@
-#include <getopt.h> // NOLINT(misc-include-cleaner)
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/stat.h>
+
+#ifndef APP_NAME
+#define APP_NAME "file_lora"
+#endif
+
+#include "main_live.h"
 
 #include "device.h"
 #include "logging.h"
 #include "main.h"
 #include "receiver.h"
 #include "source.h"
-
-#ifndef APP_NAME
-#define APP_NAME "file_lora"
-#endif
 
 static void usage(void)
 {
@@ -50,30 +50,17 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    // --- defaults ---
-    int sf = 9;
-    int os = 2;
-    int preamble_avg = 8;
-    int detect_avg = 4;
-    long sync_word_filter = 0;
-    struct chase_config chase = CHASE_CONFIG_DEFAULTS;
-    int conjugate_iq = 0;
-    int dc_block = 0;
-    int report_bad = 0;
-    double center_freq = 0.0;
-    double bandwidth = 250e3;
-    double input_rate = 0.0;
-
-    enum
-    {
-        OPT_CONJ = 256,
-        OPT_DC_BLOCK,
-        OPT_CENTER_FREQ,
-        OPT_BW,
-        OPT_INPUT_RATE,
-        OPT_CHASE,
-        OPT_REPORT_BAD,
+    // --- defaults: shared option set, file-specific center-freq 0 = off;
+    // --input-rate rides the shared capture_rate field ---
+    struct live_opts o = {
+        .sf = 9,
+        .os = 2,
+        .preamble_avg = 8,
+        .detect_avg = 4,
+        .chase = CHASE_CONFIG_DEFAULTS,
+        .bandwidth = 250e3,
     };
+
     static const struct option long_opts[] = {
         {"conj", no_argument, NULL, OPT_CONJ},
         {"dc-block", no_argument, NULL, OPT_DC_BLOCK},
@@ -88,44 +75,10 @@ int main(int argc, char **argv)
     int opt;
     while ((opt = getopt_long(argc, argv, "s:o:p:a:w:v::q::", long_opts, NULL)) != -1)
     {
+        if (live_opt(opt, &o))
+            continue;
         switch (opt)
         {
-        case 's':
-            sf = (int)strtol(optarg, NULL, 10);
-            break;
-        case 'o':
-            os = (int)strtol(optarg, NULL, 10);
-            break;
-        case 'p':
-            preamble_avg = (int)strtol(optarg, NULL, 10);
-            break;
-        case 'a':
-            detect_avg = (int)strtol(optarg, NULL, 10);
-            break;
-        case 'w':
-            sync_word_filter = (long)strtoul(optarg, NULL, 0);
-            break;
-        case OPT_CHASE:
-            chase.enabled = 1;
-            break;
-        case OPT_CONJ:
-            conjugate_iq = 1;
-            break;
-        case OPT_REPORT_BAD:
-            report_bad = 1;
-            break;
-        case OPT_DC_BLOCK:
-            dc_block = 1;
-            break;
-        case OPT_CENTER_FREQ:
-            center_freq = strtod(optarg, NULL);
-            break;
-        case OPT_BW:
-            bandwidth = strtod(optarg, NULL);
-            break;
-        case OPT_INPUT_RATE:
-            input_rate = strtod(optarg, NULL);
-            break;
         case 'v':
         case 'q':
             // -v/-v1/-v 1 and -q/-q1/-q 1
@@ -137,44 +90,30 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc || preamble_avg < 6 || sf < 5 || sf > 12 || os < 2 || os > 255 ||
-        detect_avg < 1 || detect_avg > 255 || sync_word_filter < 0 || sync_word_filter > 0xff ||
-        center_freq < 0.0 || bandwidth <= 0.0 || input_rate < 0.0)
+    if (optind >= argc || o.preamble_avg < 6 || o.sf < 5 || o.sf > 12 || o.os < 2 || o.os > 255 ||
+        o.detect_avg < 1 || o.detect_avg > 255 || o.sync_word_filter < 0 ||
+        o.sync_word_filter > 0xff || o.center_freq < 0.0 || o.bandwidth <= 0.0)
     {
         usage();
         return 1;
     }
     const char *file_path = argv[optind];
 
-    struct device *dev = device_open_file(file_path, input_rate);
+    struct device *dev = device_open_file(file_path, o.capture_rate);
     if (!dev)
     {
         log_error("cannot open %s\n", file_path);
         return 1;
     }
 
-    struct source *src = source_create(dev, sf, os, bandwidth, conjugate_iq, dc_block);
+    struct source *src = source_create(dev, o.sf, o.os, o.bandwidth, o.conjugate_iq, o.dc_block);
     if (!src)
     {
         device_close(dev);
         return 1;
     }
 
-    struct receiver *rx;
-    {
-        struct receiver_config cfg = {
-            .sf = sf,
-            .os = os,
-            .preamble_avg = preamble_avg,
-            .sync_word = sync_word_filter,
-            .detect_avg = detect_avg,
-            .center_freq = center_freq,
-            .bandwidth = bandwidth,
-            .chase = chase,
-            .report_crc_bad = report_bad,
-        };
-        rx = receiver_create(&cfg);
-    }
+    struct receiver *rx = live_receiver_create(&o);
     if (!rx)
     {
         source_destroy(src);
@@ -191,31 +130,19 @@ int main(int argc, char **argv)
         "%s: %s  SF=%d os=%d pre=%d avg=%d  ~%ld input samples\n",
         APP_NAME,
         file_path,
-        sf,
-        os,
-        preamble_avg,
-        detect_avg,
+        o.sf,
+        o.os,
+        o.preamble_avg,
+        o.detect_avg,
         est);
 
-    if (conjugate_iq)
-        log_info("spectrum conjugated (--conj)\n");
-
-    if (dc_block)
-        log_info("DC blocker on (corner %.0f Hz)\n", bandwidth / 1000.0);
-
-    if (center_freq > 0.0)
+    if (o.center_freq > 0.0)
         log_info(
             "SFO compensation on: cfo->sfo inference at %.6f MHz, bw %.0f kHz\n",
-            center_freq / 1e6,
-            bandwidth / 1e3);
+            o.center_freq / 1e6,
+            o.bandwidth / 1e3);
 
-    if (sync_word_filter)
-        log_info("filtering by sync word (net-id) 0x%02lx\n", sync_word_filter);
-    else
-        log_info("no sync word filter (any net-id accepted)\n");
-
-    if (chase.enabled)
-        log_info("chase-II retry on\n");
+    live_tail(&o);
 
     int n_decoded = receiver_run(rx, src);
     int failed = source_failed(src);

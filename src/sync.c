@@ -104,8 +104,7 @@ static float estimate_sto_frac(struct frame_sync *s)
 
     for (int i = 0; i < ust; i++)
     {
-        dsp_dechirp_pack(
-            s->est_cx_in, s->preamble_upchirps + (size_t)n * i, s->downchirp, n);
+        dsp_dechirp_pack(s->est_cx_in, s->preamble_upchirps + (size_t)n * i, s->downchirp, n);
         memset(&s->est_cx_in[n], 0, n * sizeof(*s->est_cx_in));
 
         dsp_fft(s->est_fft_cfg, s->est_cx_in, s->est_cx_out);
@@ -204,8 +203,9 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
         (s->center_freq != 0) ? (s->cfo * (float)s->bandwidth) / (float)s->center_freq : 0.0f;
 
     if (s->sfo_hat != 0.0f)
-    { // the recurrence below is the identity at sfo_hat == 0 (fs_p == fs makes
-      // A, B0 and Bblk all zero): skip the build and the no-op multiply
+    {
+        // the recurrence below is the identity at sfo_hat == 0 (fs_p == fs
+        // makes A, B0 and Bblk all zero): skip the build and the no-op multiply
         const uint32_t len1 = (uint32_t)(s->n_up_req - 1) * n;
         double clk_off = s->sfo_hat / (float)n;
         double fs = s->bandwidth;
