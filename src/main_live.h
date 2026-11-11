@@ -111,7 +111,7 @@ static inline int live_opt(int opt, struct live_opts *o)
 // first one. @p app names the device in the center-freq message.
 static int live_opts_check(const struct live_opts *o, const char *app)
 {
-    if (o->preamble_avg >= 6 && o->sf >= 5 && o->sf <= 12 && o->os >= 1 && o->os <= 255 &&
+    if (o->preamble_avg >= 6 && o->sf >= 5 && o->sf <= 12 && o->os >= 2 && o->os <= 255 &&
         o->detect_avg >= 1 && o->detect_avg <= 255 && o->sync_word_filter >= 0 &&
         o->sync_word_filter <= 0xff && o->center_freq > 0.0 && o->bandwidth > 0.0 &&
         o->capture_rate >= 0.0 && o->timeout_s >= 0.0)

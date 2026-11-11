@@ -26,7 +26,7 @@ static void usage(void)
                  "\t[-d SEL] RSP device: index (default: 0) or serial-number\n"
                  "\t         substring\n"
                  "\t[-s sf]  spreading factor, 5..12 (default: 9)\n"
-                 "\t[-o os]  oversampling factor, 1..255 (default: 4)\n"
+                 "\t[-o os]  oversampling factor, 2..255 (default: 4)\n"
                  "\t[-p pre] preamble detection windows to average (default: 8)\n"
                  "\t[-a avg] detector correlation budget K, 1..255 (default: 4)\n"
                  "\t[-w id]  hex sync word to filter by: 0x12 gr-lora,\n"

@@ -355,7 +355,10 @@ static enum frame_decode decode_frame(
     // caller-side handshake: unlock the payload budget
     frame_sync_set_symbol_budget(fs, decode_symbol_budget(h.pay_len, h.cr, h.has_crc, sf));
 
-    // payload blocks of cr+4 symbols -> sf nibbles each, soft-decoded
+    // payload blocks of cr+4 symbols -> sf nibbles each, soft-decoded.
+    // Without --chase nothing consumes the suspects: the soft scan runs
+    // plain-argmax and the copies stop
+    const int chase_on = cc->enabled;
     cw_len = (uint8_t)(h.cr + 4);
     needed = 2u * h.pay_len + (h.has_crc ? 4u : 0u);
     while (nnib < needed)
@@ -369,11 +372,12 @@ static enum frame_decode decode_frame(
         if (++nb < cw_len)
             continue;
 
-        n = decode_block(sllr, cw_len, sf, h.cr, pnib, psus);
+        n = decode_block(sllr, cw_len, sf, h.cr, pnib, chase_on ? psus : NULL);
         for (i = 0; i < (uint32_t)n && nnib < needed; i++)
         {
             nibs[nnib] = pnib[i];
-            suspects[nnib] = psus[i];
+            if (chase_on)
+                suspects[nnib] = psus[i];
             nnib++;
         }
         nb = 0;

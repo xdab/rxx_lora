@@ -100,13 +100,6 @@ sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, f
 {
     const uint32_t n = s->number_of_bins;
 
-    if (s->oversampling_factor <= 1)
-    {
-        for (uint32_t j = 0; j < n; j++)
-            dst[j] = sfd_raw(s, in, off + (int64_t)j);
-        return;
-    }
-
     const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
     const int64_t os = s->oversampling_factor;
     const int64_t back = -(int64_t)SYNC_LOOKAHEAD * (int64_t)s->samples_per_symbol;

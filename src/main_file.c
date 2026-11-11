@@ -22,7 +22,7 @@ static void usage(void)
                  "Use:\t" APP_NAME " [-options] FILE.cf32\n"
                  "\tFILE    interleaved float32 I/Q capture (baseband)\n"
                  "\t[-s sf]  spreading factor, 5..12 (default: 9)\n"
-                 "\t[-o os]  oversampling factor, 1..255 (default: 2)\n"
+                 "\t[-o os]  oversampling factor, 2..255 (default: 2)\n"
                  "\t[-p pre] preamble detection windows to average (default: 8)\n"
                  "\t[-a avg] detector correlation budget K, 1..255 (default: 4)\n"
                  "\t[-w id]  hex sync word to filter by: 0x12 gr-lora,\n"
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc || preamble_avg < 6 || sf < 5 || sf > 12 || os < 1 || os > 255 ||
+    if (optind >= argc || preamble_avg < 6 || sf < 5 || sf > 12 || os < 2 || os > 255 ||
         detect_avg < 1 || detect_avg > 255 || sync_word_filter < 0 || sync_word_filter > 0xff ||
         center_freq < 0.0 || bandwidth <= 0.0 || input_rate < 0.0)
     {
