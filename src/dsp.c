@@ -119,6 +119,34 @@ void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex 
     }
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (nt, step, beta) is the design tuple, cold path
+void dsp_sinc_fir(float *h, unsigned nt, float step, float beta)
+{
+    const unsigned mid = nt / 2;
+    const float i0b = beta > 0.0f ? dsp_bessel_i0(beta) : 0.0f;
+    float sum = 0.0f;
+
+    for (unsigned t = 0; t < nt; t++)
+    {
+        float x = step * (float)((int)t - (int)mid);
+        float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+        float w;
+        if (beta > 0.0f)
+        {
+            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
+            w = dsp_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
+        }
+        else
+        {
+            w = 0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(nt - 1));
+        }
+        h[t] = step * sinc * w;
+        sum += h[t];
+    }
+    for (unsigned t = 0; t < nt; t++)
+        h[t] /= sum;
+}
+
 /* Power-series I0, shared by the ad-hoc window designers (frame_sync, sfd);
  * converges long before the Kaiser betas in use run out of float range. */
 float dsp_bessel_i0(float x)

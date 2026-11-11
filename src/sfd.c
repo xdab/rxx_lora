@@ -267,39 +267,19 @@ int sfd_alloc(struct frame_sync *s)
     // Nyquist. Unity DC gain: h = c*sinc(c*(t - center)) windowed, normalized.
     // os == 2 instead gets a 15-tap half-band (h = 0.5*sinc((t-m)/2),
     // kaiser beta 5.7 ~ 60 dB): same cutoff, zeros at every other tap.
-    float c = 1.0f / (float)s->oversampling_factor;
-    float sum = 0.0f;
     memset(f->fir, 0, sizeof(f->fir));
     if (s->oversampling_factor == 2)
     {
-        const unsigned nt = 15, mid = nt / 2;
-        f->fir_n = nt;
-        const float beta = 5.7f, i0b = dsp_bessel_i0(beta);
-        for (unsigned t = 0; t < nt; t++)
-        {
-            float x = 0.5f * (float)((int)t - (int)mid);
-            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
-            float w = dsp_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
-            f->fir[t] = 0.5f * sinc * w;
-            sum += f->fir[t];
-        }
+        // 15-tap half-band: kaiser 5.7 at half-symbol spacing, zeros at
+        // every other tap
+        f->fir_n = 15;
+        dsp_sinc_fir(f->fir, f->fir_n, 0.5f, 5.7f);
     }
     else
     {
         f->fir_n = SFD_FIR_TAPS;
-        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
-        {
-            float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
-            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-            float w =
-                0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
-            f->fir[t] = c * sinc * w;
-            sum += f->fir[t];
-        }
+        dsp_sinc_fir(f->fir, f->fir_n, 1.0f / (float)s->oversampling_factor, 0.0f);
     }
-    for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
-        f->fir[t] /= sum;
 
     // fir_v: fir zero-padded to whole vectors; st: worst-case staging span
     // (one symbol of os-strided taps + the pad)
