@@ -13,8 +13,6 @@
  */
 struct resampler;
 
-struct resampler;
-
 /**
  * Resampler for rate_in -> rate_out (Hz), any positive ratio. `bandwidth_hz`
  * is the signal bandwidth the filter must preserve: the anti-alias cutoff is

@@ -20,7 +20,6 @@ struct source
     long off;             // absolute position of the oldest buffered sample; opens at -slack
     size_t slack;         // retained history behind the scan, and the end-of-stream pad
     long total;           // data length once the stream has ended (before padding)
-    double rate_in;       // device (input/file) rate, for source_input_sample
     double rate_out;      // working rate bw*os
     int eof;
     int err;            // allocation failure: folds into the end-of-stream return
@@ -166,7 +165,6 @@ source_create(struct device *dev, int sf, int os, double bandwidth, int conj, in
     if (dev_rate <= 0.0)
         dev_rate = rate_target;
 
-    s->rate_in = dev_rate;
     s->rate_out = rate_target;
 
     /* Strip the zero-IF tuner's DC offset and 1/f junk at the device rate,
@@ -213,19 +211,7 @@ void source_advance(struct source *s, size_t pos)
     }
 }
 
-size_t source_input_sample(const struct source *s, size_t pos)
-{
-    if (!s->rs)
-        return pos;
-
-    return (size_t)llround((double)pos * s->rate_in / s->rate_out);
-}
-
 /* Wall-clock offset of an absolute working-grid position from the start of
- * the stream, in seconds (pos/rate_out == input_sample/rate_in). */
-double source_time_seconds(const struct source *s, size_t pos)
-{
-    return s->rate_out > 0.0 ? (double)pos / s->rate_out : 0.0;
-}
+ */
 
 int source_failed(const struct source *s) { return s->err; }

@@ -22,21 +22,12 @@ struct output_record
 };
 
 /**
- * @brief Render one record as a single JSON line on stdout.
+ * @brief Render one record as a single JSON line on stdout. @p b64 is the
+ *        record's already base64-encoded packet (b64_encode).
  *
- * A fixed printf template, not a serializer; packet is base64 and every
- * other field is a JSON number, boolean or null.
+ * A fixed printf template, not a serializer; every other field is a JSON
+ * number, boolean or null.
  */
-void output_frame(const struct output_record *rec);
-
-/**
- * @brief Encode a byte buffer as base64 into out, null-terminated.
- *
- * The output should be at least 4*(in_len+2)/3 + 1 bytes in size (including
- * the terminator).
- *
- * @return 0 on success, -1 when out is NULL or out_cap is too small
- */
-int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap);
+void output_frame(const struct output_record *rec, const char *b64);
 
 #endif // OUTPUT_H

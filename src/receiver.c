@@ -74,10 +74,8 @@ struct frame_result
  */
 static void log_input_sample(struct source *src, size_t pos)
 {
-    log_debug(
-        "input sample %zu (%.3f s)\n",
-        source_input_sample(src, pos),
-        source_time_seconds(src, pos));
+    (void)src;
+    log_debug("grid sample %zu\n", pos);
 }
 
 /*
@@ -493,6 +491,28 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
     return 0;
 }
 
+static int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap)
+{
+    static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (4 * ((in_len + 2) / 3) + 1 > out_cap)
+        return -1;
+    size_t o = 0;
+    for (size_t i = 0; i < in_len; i += 3)
+    {
+        uint32_t v = (uint32_t)in[i] << 16;
+        if (i + 1 < in_len)
+            v |= (uint32_t)in[i + 1] << 8;
+        if (i + 2 < in_len)
+            v |= in[i + 2];
+        out[o++] = tab[(v >> 18) & 63];
+        out[o++] = tab[(v >> 12) & 63];
+        out[o++] = i + 1 < in_len ? tab[(v >> 6) & 63] : '=';
+        out[o++] = i + 2 < in_len ? tab[v & 63] : '=';
+    }
+    out[o] = '\0';
+    return 0;
+}
+
 // Report one completed frame: the human verdict on stderr, one JSON line on
 // stdout. crc_valid carries the verdict: 1 valid, 0 invalid, -1 absent.
 static void report_frame(
@@ -508,8 +528,9 @@ static void report_frame(
     rec.crc_valid = verdict == DECODE_CRC_OK ? 1 : (verdict == DECODE_CRC_BAD ? 0 : -1);
     rec.cfo_hz = (double)st->cfo * st->bandwidth / (double)st->number_of_bins;
 
-    if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) == 0)
-        log_info("RX: %s\n", b64);
+    if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) != 0)
+        b64[0] = '\0'; // one encode serves both the stderr line and stdout
+    log_info("RX: %s\n", b64);
 
     if (!rec.crc_present)
         log_info("CRC absent\n");
@@ -518,7 +539,7 @@ static void report_frame(
     else
         log_warn("CRC invalid\n");
 
-    output_frame(&rec);
+    output_frame(&rec, b64);
 }
 
 struct receiver *receiver_create(const struct receiver_config *cfg)

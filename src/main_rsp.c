@@ -48,7 +48,7 @@ static void usage(void)
                  "\t         offset / 1-f junk; corner at bw/1000)\n"
                  "\t[--center-freq HZ] RF center to tune to (required); also enables\n"
                  "\t         the CFO->SFO inference on the live clock\n"
-                 "\t[--bw HZ] chirp bandwidth (default: 125000); sets the working\n"
+                 "\t[--bw HZ] chirp bandwidth (default: 250000); sets the working\n"
                  "\t         rate bw*os and the default capture rate\n"
                  "\t[--input-rate HZ] RSP capture rate (default: bw*os); snapped to\n"
                  "\t         the API's 2/4/8 MS/s\n"

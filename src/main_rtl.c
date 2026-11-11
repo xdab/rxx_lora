@@ -12,10 +12,6 @@
 #include "receiver.h"
 #include "source.h"
 
-#ifndef APP_NAME
-#define APP_NAME "rtl_lora"
-#endif
-
 static void usage(void)
 {
     (void)fprintf(
@@ -25,7 +21,7 @@ static void usage(void)
                  "Use:\t" APP_NAME " --center-freq HZ [-options]\n"
                  "\t[-d N]   RTL-SDR device index (default: 0)\n"
                  "\t[-s sf]  spreading factor, 5..12 (default: 9)\n"
-                 "\t[-o os]  oversampling factor, 1..255 (default: 2)\n"
+                 "\t[-o os]  oversampling factor, 1..255 (default: 4)\n"
                  "\t[-p pre] preamble detection windows to average (default: 8)\n"
                  "\t[-a avg] detector correlation budget K, 1..255 (default: 4)\n"
                  "\t[-w id]  hex sync word to filter by: 0x12 gr-lora,\n"
@@ -47,7 +43,7 @@ static void usage(void)
                  "\t         offset / 1-f junk; corner at bw/1000)\n"
                  "\t[--center-freq HZ] RF center to tune to (required); also enables\n"
                  "\t         the CFO->SFO inference on the live clock\n"
-                 "\t[--bw HZ] chirp bandwidth (default: 125000); sets the working\n"
+                 "\t[--bw HZ] chirp bandwidth (default: 250000); sets the working\n"
                  "\t         rate bw*os and the default capture rate\n"
                  "\t[--input-rate HZ] dongle capture rate (default: bw*os); snapped\n"
                  "\t         to a rate the RTL2832U supports\n"
