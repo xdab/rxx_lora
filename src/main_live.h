@@ -32,8 +32,6 @@ enum
     OPT_INPUT_RATE,
     OPT_PPM, // rtl only
     OPT_CHASE,
-    OPT_CHASE_K,
-    OPT_CHASE_TAU,
     OPT_REPORT_BAD,
 };
 
@@ -86,12 +84,6 @@ static inline int live_opt(int opt, struct live_opts *o)
     case OPT_CHASE:
         o->chase.enabled = 1;
         return 1;
-    case OPT_CHASE_K:
-        o->chase.k = (int)strtol(optarg, NULL, 10);
-        return 1;
-    case OPT_CHASE_TAU:
-        o->chase.tau = strtof(optarg, NULL);
-        return 1;
     case OPT_REPORT_BAD:
         o->report_bad = 1;
         return 1;
@@ -122,7 +114,7 @@ static int live_opts_check(const struct live_opts *o, const char *app)
     if (o->preamble_avg >= 6 && o->sf >= 5 && o->sf <= 12 && o->os >= 1 && o->os <= 255 &&
         o->detect_avg >= 1 && o->detect_avg <= 255 && o->sync_word_filter >= 0 &&
         o->sync_word_filter <= 0xff && o->center_freq > 0.0 && o->bandwidth > 0.0 &&
-        o->capture_rate >= 0.0 && o->timeout_s >= 0.0 && o->chase.k >= 1 && o->chase.k <= 8)
+        o->capture_rate >= 0.0 && o->timeout_s >= 0.0)
         return 0;
 
     if (o->center_freq <= 0.0)
@@ -233,7 +225,7 @@ static void live_tail(const struct live_opts *o)
         log_info("no sync word filter (any net-id accepted)\n");
 
     if (o->chase.enabled)
-        log_info("chase-II retry on: k=%d tau=%g\n", o->chase.k, (double)o->chase.tau);
+        log_info("chase-II retry on\n");
 
     log_info("listening... (Ctrl-C to stop)\n");
 }

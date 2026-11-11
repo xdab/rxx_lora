@@ -29,8 +29,6 @@ static void usage(void)
                  "\t         0x2b Meshtastic; omit to accept any\n"
                  "\t[--chase] chase-II retry: on a payload CRC fail, re-decode the\n"
                  "\t         least-reliable codewords on their runner-ups\n"
-                 "\t[--chase-k N] [--chase-tau X] retry tuning with --chase\n"
-                 "\t         (defaults: 8 suspects, LLR-loss budget 1.0)\n"
                  "\t[--report-bad] also write CRC-invalid frames to stdout\n"
                  "\t         (default: only CRC-valid and CRC-absent frames)\n"
                  "\t[-v [N]] verbosity: 1 (or bare -v) adds DEBUG, 2 adds TRACE\n"
@@ -74,8 +72,6 @@ int main(int argc, char **argv)
         OPT_BW,
         OPT_INPUT_RATE,
         OPT_CHASE,
-        OPT_CHASE_K,
-        OPT_CHASE_TAU,
         OPT_REPORT_BAD,
     };
     static const struct option long_opts[] = {
@@ -85,8 +81,6 @@ int main(int argc, char **argv)
         {"bw", required_argument, NULL, OPT_BW},
         {"input-rate", required_argument, NULL, OPT_INPUT_RATE},
         {"chase", no_argument, NULL, OPT_CHASE},
-        {"chase-k", required_argument, NULL, OPT_CHASE_K},
-        {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
         {"report-bad", no_argument, NULL, OPT_REPORT_BAD},
         {NULL, 0, NULL, 0},
     };
@@ -113,12 +107,6 @@ int main(int argc, char **argv)
             break;
         case OPT_CHASE:
             chase.enabled = 1;
-            break;
-        case OPT_CHASE_K:
-            chase.k = (int)strtol(optarg, NULL, 10);
-            break;
-        case OPT_CHASE_TAU:
-            chase.tau = strtof(optarg, NULL);
             break;
         case OPT_CONJ:
             conjugate_iq = 1;
@@ -151,7 +139,7 @@ int main(int argc, char **argv)
 
     if (optind >= argc || preamble_avg < 6 || sf < 5 || sf > 12 || os < 1 || os > 255 ||
         detect_avg < 1 || detect_avg > 255 || sync_word_filter < 0 || sync_word_filter > 0xff ||
-        center_freq < 0.0 || bandwidth <= 0.0 || input_rate < 0.0 || chase.k < 1 || chase.k > 8)
+        center_freq < 0.0 || bandwidth <= 0.0 || input_rate < 0.0)
     {
         usage();
         return 1;
@@ -227,7 +215,7 @@ int main(int argc, char **argv)
         log_info("no sync word filter (any net-id accepted)\n");
 
     if (chase.enabled)
-        log_info("chase-II retry on: k=%d tau=%g\n", chase.k, (double)chase.tau);
+        log_info("chase-II retry on\n");
 
     int n_decoded = receiver_run(rx, src);
     int failed = source_failed(src);

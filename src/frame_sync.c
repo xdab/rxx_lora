@@ -271,21 +271,16 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
 {
     *st = (struct frame_sync_status){
         .sf = s->spreading_factor,
-        .os = s->oversampling_factor,
         .samples_per_symbol = s->samples_per_symbol,
         .number_of_bins = s->number_of_bins,
         .bandwidth = s->bandwidth,
         .k_hat = s->k_hat,
         .n_up_req = s->n_up_req,
-        .down_val = s->down_val,
         .cfo = s->cfo,
         .sfo_hat = s->sfo_hat,
         .sto_frac = s->sto_frac,
         .netid_dec = {s->netid_dec[0], s->netid_dec[1]},
         .sync_words = {s->sync_words[0], s->sync_words[1]},
-        .sync_word_rx = s->sync_word_rx,
-        .symbol_cnt = s->symbol_cnt,
-        .bin_idx = s->bin_idx,
     };
 }
 

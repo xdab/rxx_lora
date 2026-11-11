@@ -197,10 +197,10 @@ int frame_sync_detect_step(struct frame_sync *s, const float complex *in, int64_
         // past n_up_req are SYNC's
         s->symbol_cnt = 0;
         s->additional_upchirps = 0;
+        // the vote cannot miss: every entry is a valid bin, so some bin
+        // always has a count
         s->k_hat =
             util_most_frequent(s->preamb_up_vals, s->n_up_req, s->number_of_bins, s->mode_hash);
-        if (s->k_hat < 0)
-            return -1;
 
         struct sfd_result sfd;
         if (!sfd_locate(s, in, &sfd))

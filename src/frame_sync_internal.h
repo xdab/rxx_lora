@@ -130,7 +130,6 @@ struct frame_sync
                                  // whole-bin part arrives
     float sfo_hat;               // sampling-frequency offset estimate
     int netid_dec[2];            // net-id symbols after full correction
-    uint8_t sync_word_rx;        // 1-byte sync word rebuilt from the decoded pair
     int32_t consume;             // samples consumed by the last step; signed, may go negative (clamped at the SYNC handoff)
     uint32_t symb_numb;          // total output windows incl. 8 header
     int received_head;           // header decoded; unlocks the payload budget

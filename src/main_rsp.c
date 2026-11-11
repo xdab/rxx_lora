@@ -33,8 +33,6 @@ static void usage(void)
                  "\t         0x2b Meshtastic; omit to accept any\n"
                  "\t[--chase] chase-II retry: on a payload CRC fail, re-decode the\n"
                  "\t         least-reliable codewords on their runner-ups\n"
-                 "\t[--chase-k N] [--chase-tau X] retry tuning with --chase\n"
-                 "\t         (defaults: 8 suspects, LLR-loss budget 1.0)\n"
                  "\t[--report-bad] also write CRC-invalid frames to stdout\n"
                  "\t         (default: only CRC-valid and CRC-absent frames)\n"
                  "\t[-g db]  IF gain reduction, 0..59 dB (default: automatic);\n"
@@ -81,8 +79,6 @@ int main(int argc, char **argv)
         {"bw", required_argument, NULL, OPT_BW},
         {"input-rate", required_argument, NULL, OPT_INPUT_RATE},
         {"chase", no_argument, NULL, OPT_CHASE},
-        {"chase-k", required_argument, NULL, OPT_CHASE_K},
-        {"chase-tau", required_argument, NULL, OPT_CHASE_TAU},
         {"report-bad", no_argument, NULL, OPT_REPORT_BAD},
         {NULL, 0, NULL, 0},
     };

@@ -418,15 +418,14 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
  * mismatch, rewinds the state machine to DETECT.
  *
  * @param[in] start_off the decimated pair's grid start, in samples (trace only)
- * @param[out] early_walk set on a one-symbol-early pair, accepted with a
+ * The one-symbol-early pair is accepted with a
  *             whole symbol of grid advance
  * @return 1 to reset (the state is already rewound), 0 to accept
  */
-static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
+static int netid_verdict(struct frame_sync *s, int start_off)
 {
     const uint32_t n = s->number_of_bins;
     int reset = 0;
-    *early_walk = 0; // the pair legitimately read one symbol low
 
     if (s->sync_words[0] == 0)
     { /* accept-any: snap netid1 to the nearest multiple of 8 (the map
@@ -483,7 +482,6 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
         {
             s->net_id_off = 0; // the -8 is the wrong symbol, not a slip
             s->consume = (int32_t)s->samples_per_symbol;
-            *early_walk = 1;
             log_debug(
                 "netid early walk: dec %d,%d -> grid advanced one symbol\n",
                 s->netid_dec[0],
@@ -534,19 +532,6 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
 
         frame_sync_reset_detect(s);
         return 1;
-    }
-
-    // the sync word actually received, rebuilt from the decoded pair
-    // (nibble<<3 bins per symbol, grid slip removed, early walk shifted)
-    {
-        long n0 = util_mod(s->netid_dec[0] - s->net_id_off, n) / 8;
-        long n1 = util_mod(s->netid_dec[1] - s->net_id_off, n) / 8;
-        if (*early_walk) // the windows sat one symbol early
-        {
-            n0++;
-            n1++;
-        }
-        s->sync_word_rx = (uint8_t)(((n0 & 0xF) << 4) | (n1 & 0xF));
     }
 
     return 0;
@@ -659,8 +644,7 @@ int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t
 
         int start_off = decode_netid_pair(s, cfo_int);
 
-        int early_walk = 0;
-        if (netid_verdict(s, start_off, &early_walk))
+        if (netid_verdict(s, start_off))
         { // mismatch: the state is already back in DETECT
             return -1;
         }

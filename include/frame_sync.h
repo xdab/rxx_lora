@@ -31,7 +31,6 @@ struct frame_sync_status
 {
     // configuration-derived
     int sf;                      // spreading factor
-    int os;                      // oversampling factor, samples per chip
     uint32_t samples_per_symbol; // window length, N * os
     uint32_t number_of_bins;     // N = 2^sf
     uint32_t bandwidth;          // chirp bandwidth, Hz
@@ -41,17 +40,11 @@ struct frame_sync_status
     int n_up_req; // stable windows required: preamble_len - 3
 
     // sync results, valid once frame_sync_sync_step() accepted
-    int down_val;           // SFD downchirp demod value
     float cfo;              // carrier-frequency offset, in FFT bins
     float sfo_hat;          // sampling-frequency offset estimate
     float sto_frac;         // fractional sampling-time offset, in bins
     int netid_dec[2];       // net-id symbols after full correction
     uint16_t sync_words[2]; // expected network-id symbols
-    uint8_t sync_word_rx;   // 1-byte sync word rebuilt from the decoded pair
-
-    // state-machine progress, for trace logging
-    int symbol_cnt; // DETECT: stable windows; SYNC: sub-phase
-    int bin_idx;    // previous window's winning bin
 };
 
 /**
