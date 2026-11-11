@@ -39,18 +39,18 @@ enum frame_sync_subphase
 
 /** Fine-pass reference spectra: down-ref slots (x 4N each); the up-ref row
  *  holding the sigma2 slot (the SFD start at shift 0). */
-#define SFD_FINE_DN 12
+#define SFD_FINE_DN 8
 #define SFD_FINE_UP 1
 
 /** Fine-pass decimated slots, offsets -9..2 windows (shared by both refs;
  *  row = slot + 9). */
-#define SFD_FINE_DEC 12
+#define SFD_FINE_DEC 8
 
 /** Coarse change-point pair-slot spectra, slots SFD_Q_MIN..SFD_Q_MAX+1 (4N each). */
 #define SFD_DPAIR 8
 
 /** Pairing representatives: (tau, f) and (tau +- N/2, f +- N/2) at most. */
-#define SFD_MAX_TAU_REPS 3
+#define SFD_MAX_TAU_REPS 2
 
 /** One fine-pass hypothesis: a scored slot shift. */
 struct sfd_cand
