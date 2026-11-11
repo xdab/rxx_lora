@@ -105,25 +105,45 @@ behavior of a binary that batches 1–3 change.
 
 ## Needs attention (owner decisions)
 
-- `main_rtl.c`: usage text says `-o` default 2, code sets 4. Preserved as
-  found (behavior change deferred); pick one — text or code — from the
-  verified live configuration.
+- `main_file.c` still carries its own getopt enum, option cases and
+  receiver-config assembly that duplicate `main_live.h`'s `live_opt` /
+  `live_receiver_create` (scout-verified case-for-case identical, ~70 LoC).
+  It needs its own validation and tail (its `--center-freq` default is 0 =
+  off, no `-x`/`-R`), so the adoption is partial — not done yet.
+- The worded net-id apparatus (~155 LoC) was flagged for deletion by a
+  blind scout as "gate-dead" — that scout is wrong: regression.py's
+  `-w0x20`/`-w0x2b` capture cases exercise it. It stays (documented
+  real-capture rationale besides).
+- os == 1: no gate, no perf row, no capture uses it, but the CLI admits
+  1..255 and the sfd/gather os<=1 paths exist for it. Clamping the CLI to
+  os >= 2 would let those paths go (~15 LoC). Contract decision.
+- Kaiser/sinc window design written three times (dsp_kaiser_lowpass vs
+  hand-rolled in frame_sync/sfd): a shared `dsp_sinc_fir` would save ~45
+  LoC but changes tap values in the last ulp — needs a BER sweep, and the
+  resampler taps are load-bearing for recorded bit-exact results.
+
+## Measured and rejected
+
 - Chase-II verdict: measured (MediumFast, paired seeds, 250 trials/point,
   `--chase` vs base): BER 0.936→0.901 at −18 dB, 0.604→0.505 at −17,
   0.192→0.156 at −16 — about 0.3 dB of knee for ~200 LoC. At the
   campaign's exchange rate (0.2 dB ≈ 1000 LoC) that makes deletion a bad
   trade: **keep `--chase`**. `hamming.c`'s alt/margin out-params stay with
-  it. A follow-up micro-item if wanted: skip the suspect computation when
-  chase is disabled.
-
-## Measured and rejected
-
+  it. The `--chase-k`/`--chase-tau` tunables nothing ever set are now
+  CHASE_K/CHASE_TAU constants.
 - `sfd_slot_dec` scalar FIR (the textbook form its edge loops already use)
   instead of the whole-vector kernel: −55 LoC of the most intricate code,
   but the paired callgrind run prices it at +167% Ir on the function
   (os=2, 14.8→39.5M) and +280% (os=8, 31.6→120.1M) — +11.8% total Ir.
   Overturns the performance campaigns; the SIMD interior stays. The
   staging-span and padded-tap machinery it needs is load-bearing.
+- `kaiser_beta`'s non-60 attenuation branches: reachable-by-nothing at the
+  only call site (as=60 hardcoded), but deleting branches of the standard
+  Kaiser:1974 table leaves it silently wrong for other inputs. Kept as the
+  textbook table.
+- Merging dsp.c's A&S `besseli0` into the shared power-series
+  `dsp_bessel_i0`: would change the resampler's Kaiser prototype taps in
+  the last ulp. Recorded bit-exact results depend on them; skip.
 
 ## A/B protocol for the batches
 
