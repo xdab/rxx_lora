@@ -54,7 +54,8 @@ void demod_reset(struct demod_state *s, float cfo)
     int cfo_bins = util_round(cfo);
     float cfo_rest = cfo - (float)cfo_bins;
 
-    util_build_upchirp(s->upchirp, util_mod(cfo_bins, (long)s->number_of_bins), s->spreading_factor);
+    util_build_upchirp(
+        s->upchirp, util_mod(cfo_bins, (long)s->number_of_bins), s->spreading_factor);
     for (uint32_t n = 0; n < s->number_of_bins; n++)
         s->downchirp[n] = conjf(s->upchirp[n]);
 

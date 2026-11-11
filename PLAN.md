@@ -103,18 +103,13 @@ behavior, only the knob is a candidate), `hamming.c`'s alt/margin out-params
 Python tools (3,123 LoC) sweep after the C code settles — the tools assert
 behavior of a binary that batches 1–3 change.
 
-## Correctness finds (fix regardless of campaign)
+## Needs attention (owner decisions)
 
-- `tools/ber.py` generated every frame with the hardcoded `sync=[8,16]`
-  (netid 0x12) while passing `--netid` to the binary as `-w` — any other
-  netid filtered frames that never carried it, a 100%-header-fail sweep.
-  Fixed: frames now carry the requested netid via `frame.netid_syms`
-  (nibble*8, matching sync.c's inversion); the 0x12 default is unchanged,
-  so archived A/B arms stay reproducible.
-- `src/device_rtl.c` `nearest_gain`: the `count > RTL_MAX_TUNER_GAINS` clamp
-  is overwritten by the re-query on the next line.
-- `src/main_rtl.c`: usage text says `-o` default 2, code sets 4. One of the
-  two is wrong; fix to match the verified live configuration.
+- `main_rtl.c`: usage text says `-o` default 2, code sets 4. Preserved as
+  found (behavior change deferred); pick one — text or code — from the
+  verified live configuration.
+- Chase-II: the Tier-3 verdict (delete vs keep vs disable-when-off) is
+  pending its BER sweep; `hamming.c`'s alt/margin out-params hang on it.
 
 ## A/B protocol for the batches
 

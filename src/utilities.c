@@ -44,11 +44,9 @@ void util_build_upchirp(float complex *chirp, uint32_t id, uint8_t sf)
         // the (double)i casts are load-bearing: uncast, `i * i` is an integer
         // multiply that wraps past i = 65535 and corrupts the chirp
         if ((double)i < n_fold)
-            phase = 2.0 * M_PI *
-                    ((double)i * i / (2.0 * n) + ((double)id / n - 0.5) * i);
+            phase = 2.0 * M_PI * ((double)i * i / (2.0 * n) + ((double)id / n - 0.5) * i);
         else
-            phase = 2.0 * M_PI *
-                    ((double)i * i / (2.0 * n) + ((double)id / n - 1.5) * i);
+            phase = 2.0 * M_PI * ((double)i * i / (2.0 * n) + ((double)id / n - 1.5) * i);
         chirp[i] = cexp(I * phase);
     }
 }
@@ -60,4 +58,3 @@ void util_build_ref_chirps(float complex *upchirp, float complex *downchirp, uin
     for (uint32_t k = 0; k < (1u << sf); k++)
         downchirp[k] = conjf(upchirp[k]);
 }
-

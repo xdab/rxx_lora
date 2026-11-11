@@ -54,15 +54,15 @@ struct frame_sync *frame_sync_create(
     int ret = -1;
 // Allocate a working buffer; a failure jumps straight to the cleanup, which
 // frees every slot (all pointers start NULL from the calloc above).
-#define FS_ALLOC(field, count)                                    \
-    do                                                            \
-    {                                                             \
-        s->field = malloc((size_t)(count) * sizeof(*s->field));   \
-        if (!s->field)                                            \
-        {                                                         \
-            log_error("frame_sync_create: out of memory\n");      \
-            goto out;                                             \
-        }                                                         \
+#define FS_ALLOC(field, count)                                                                     \
+    do                                                                                             \
+    {                                                                                              \
+        s->field = malloc((size_t)(count) * sizeof(*s->field));                                    \
+        if (!s->field)                                                                             \
+        {                                                                                          \
+            log_error("frame_sync_create: out of memory\n");                                       \
+            goto out;                                                                              \
+        }                                                                                          \
     } while (0)
 
     FS_ALLOC(preamb_up_vals, s->n_up_req);
@@ -210,24 +210,8 @@ void frame_sync_set_symbol_budget(struct frame_sync *s, uint32_t symb_numb)
     s->received_head = 1;
 }
 
-/* Gather kernel half-length: 2*FRAC_M taps. The default matches the house
- * resampler's m=4 (60 dB); experimental builds can sweep it. */
-static unsigned frac_gather_m(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: gather kernel half-length
-    static unsigned cached = 0;
-    if (!cached)
-    {
-        const char *e = getenv("FRAC_M");
-        cached = e ? (unsigned)strtol(e, NULL, 10) : 4;
-        if (cached < 1 || cached > 8)
-            cached = 4;
-    }
-    return cached;
-#else
-    return 4;
-#endif
-}
+/* Gather kernel half-length: 2*FRAC_M taps, the house resampler's m=4 (60 dB). */
+#define FRAC_M 4
 
 // a gather is directional (dst <- in); the geometry quadruple is inherent
 void frame_sync_frac_gather(
@@ -238,7 +222,7 @@ void frame_sync_frac_gather(
     uint32_t count,
     uint32_t len)
 {
-    unsigned m = frac_gather_m();
+    unsigned m = FRAC_M;
     int i0 = (int)floorf(base);
     float f = base - (float)i0;
 

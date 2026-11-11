@@ -15,13 +15,6 @@ OBJ_DIR := obj/prof
 TARGET_SUFFIX := .prof
 endif
 
-# make experimental: RXX_EXPERIMENTAL hooks compiled in (see AGENTS.md), obj/exp, *.exp
-ifeq ($(EXPERIMENTAL),1)
-CFLAGS += -DRXX_EXPERIMENTAL=1
-OBJ_DIR := obj/exp
-TARGET_SUFFIX := .exp
-endif
-
 # make cov: -O0 gcov build for branch/line coverage maps, obj/cov, *.cov
 ifeq ($(COVERAGE),1)
 CFLAGS += -O0 -g --coverage
@@ -84,10 +77,6 @@ install: all
 .PHONY: profile
 profile:
 	$(MAKE) PROFILE=1 all
-
-.PHONY: experimental
-experimental:
-	$(MAKE) EXPERIMENTAL=1 all
 
 .PHONY: cov
 cov:
@@ -167,7 +156,6 @@ help:
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
 	@echo "  install     - Install all three binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
-	@echo "  experimental - Build *.exp binaries with the RXX_EXPERIMENTAL hooks compiled in"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
 	@echo "  clean       - Remove build artifacts (obj/, bin/)"
 	@echo "  doc         - Generate API docs with doxygen"

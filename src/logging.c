@@ -42,13 +42,13 @@ static void vlog(enum log_level lvl, const char *fmt, va_list ap)
 void log_set_level(enum log_level level) { threshold = level; }
 
 // The five wrappers differ only in level (see logging.h for the contract).
-#define LOG_FN(name, lvl)             \
-    void name(const char *fmt, ...)   \
-    {                                 \
-        va_list ap;                   \
-        va_start(ap, fmt);            \
-        vlog(lvl, fmt, ap);           \
-        va_end(ap);                   \
+#define LOG_FN(name, lvl)                                                                          \
+    void name(const char *fmt, ...)                                                                \
+    {                                                                                              \
+        va_list ap;                                                                                \
+        va_start(ap, fmt);                                                                         \
+        vlog(lvl, fmt, ap);                                                                        \
+        va_end(ap);                                                                                \
     }
 
 LOG_FN(log_trace, LOG_TRACE)

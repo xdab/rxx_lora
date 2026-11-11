@@ -34,26 +34,10 @@
 #define MAX_SF 12        // widest LLR row: one chip per bit position
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
 
-/* Rewind depth past a bad frame's fire, in whole symbol windows. Deeper skips
- * cut the re-decode cycles on noise spans but can step over a real preamble
- * hiding within SKIP windows of the fire. Experimental sweep: REWIND_SKIP. */
+/* Rewind depth past a bad frame's fire, in whole symbol windows. The PR #9
+ * sweep held flat through K=8 and stepped over a real frame at K=10; 4 sits
+ * inside the flat region. */
 #define REWIND_SKIP_SYMS 4
-
-static unsigned rewind_skip_syms(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: rewind depth past a bad fire
-    static unsigned cached;
-    if (!cached)
-    {
-        const char *e = getenv("REWIND_SKIP");
-        long v = e ? strtol(e, NULL, 10) : REWIND_SKIP_SYMS;
-        cached = v < 1 || v > 10 ? (unsigned)REWIND_SKIP_SYMS : (unsigned)v;
-    }
-    return cached;
-#else
-    return REWIND_SKIP_SYMS;
-#endif
-}
 #define MAX_BYTES 255 // the PHY length field is one byte
 
 struct receiver
@@ -655,7 +639,7 @@ int receiver_run(struct receiver *r, struct source *src)
              * decode: rewind past the fire window and rescan (truncated
              * frames have nothing to recover) */
             if (verdict == DECODE_HEADER || verdict == DECODE_CRC_BAD)
-                pos = fire_pos + (size_t)rewind_skip_syms() * st.samples_per_symbol;
+                pos = fire_pos + (size_t)REWIND_SKIP_SYMS * st.samples_per_symbol;
         }
 
         // rewind for the next frame; the guard keeps the scan moving even if
