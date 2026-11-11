@@ -96,13 +96,6 @@ struct sfd_result
 {
     int64_t t_edge; // SFD symbol start, samples relative to the fire window
     float t_frac;   // t_edge's sub-sample remainder (the tau rounding residue)
-    int q;          // change-point SFD candidate, windows past the fire
-    float u;        // lock tone f + tau on the fire grid, bins
-    float d;        // change-point downchirp tone f - tau, bins
-    float tau;      // resolved timing offset, bins
-    float f;        // resolved CFO on the re-timed grid, bins
-    float lam;      // fine score in noise-power units
-    float margin;   // lam lead over the best other hypothesis
 };
 
 /**

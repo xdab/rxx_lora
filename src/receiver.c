@@ -62,7 +62,6 @@ struct receiver
     struct demod_state demod; // allocated once, reset per frame
     struct chase_config chase;
     int report_crc_bad; // emit CRC-invalid frames on stdout (--report-bad)
-    int sf;
 };
 
 // outcome of one frame, one value per termination path
@@ -113,10 +112,12 @@ static int next_symbol(
 {
     const float complex *w = source_window(src, *pos, *pos + st->samples_per_symbol);
     uint32_t advance;
-    const float complex *out = w ? frame_sync_output_step(fs, w, &advance, st) : NULL;
+    const float complex *out = w ? frame_sync_output_step(fs, w, &advance) : NULL;
 
     if (!out)
         return -1;
+
+    frame_sync_status(fs, st);
 
     (void)demod_step(fd, out); // hard value unused: soft only
     demod_soft_llrs(fd, llr);
@@ -433,7 +434,8 @@ static int detect_frame(
     while ((w = source_window(src, *pos, *pos + st->samples_per_symbol)))
     {
         int64_t advance = 0;
-        int ret = frame_sync_detect_step(fs, w, &advance, st);
+        int ret = frame_sync_detect_step(fs, w, &advance);
+        frame_sync_status(fs, st);
 
         if (ret < 0)
         {
@@ -482,7 +484,8 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
     while ((w = source_window(src, *pos, *pos + 2 * (size_t)st->samples_per_symbol)))
     {
         uint32_t advance = 0;
-        int ret = frame_sync_sync_step(fs, w, &advance, st);
+        int ret = frame_sync_sync_step(fs, w, &advance);
+        frame_sync_status(fs, st);
 
         if (ret > 0)
         {
@@ -499,17 +502,6 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
                 *pos);
             log_input_sample(src, *pos);
 
-            int grid_shift = (int)advance - (int)(st->samples_per_symbol / 4);
-            log_trace(
-                "CFO: cfo=%+.4f bins (%.1f Hz) from SFD down_val=%d\n"
-                "CFO: payload grid shift = %d samples (= %+.4f chips, "
-                "1 chip per bin)\n",
-                (double)st->cfo,
-                (double)st->cfo * st->bandwidth / st->number_of_bins,
-                st->down_val,
-                grid_shift,
-                (double)grid_shift / (double)st->os);
-
             return 1;
         }
 
@@ -525,12 +517,6 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
             return 0;
         }
 
-        log_trace(
-            "sync step pos=%zu (input %zu) cnt=%d bin=%d\n",
-            *pos,
-            source_input_sample(src, *pos),
-            st->symbol_cnt,
-            st->bin_idx);
         *pos += st->samples_per_symbol; // SYNC consumes one window per step
     }
     return 0;
@@ -585,7 +571,6 @@ struct receiver *receiver_create(const struct receiver_config *cfg)
 
     r->chase = cfg->chase;
     r->report_crc_bad = cfg->report_crc_bad;
-    r->sf = cfg->sf;
     r->fs = frame_sync_create(
         (uint8_t)cfg->sf,
         (uint8_t)cfg->os,
@@ -630,7 +615,7 @@ int receiver_run(struct receiver *r, struct source *src)
     int n_crc_ok = 0, n_crc_bad = 0, n_crc_absent = 0;
     int n_header_fail = 0, n_truncated = 0;
 
-    frame_sync_status(fs, &st); // one snapshot, kept fresh by every step below
+    frame_sync_status(fs, &st); // one snapshot, refreshed after every step below
 
     size_t pos = 0;
     size_t lock_pos = 0; // frame start: where DETECT fired

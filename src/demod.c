@@ -19,7 +19,6 @@ int demod_init(struct demod_state *s, uint8_t sf)
     memset(s, 0, sizeof(*s));
     s->spreading_factor = sf;
     s->number_of_bins = 1u << sf;
-    s->samples_per_symbol = s->number_of_bins;
 
     s->upchirp = malloc(s->number_of_bins * sizeof(*s->upchirp));
     s->downchirp = malloc(s->number_of_bins * sizeof(*s->downchirp));
@@ -121,7 +120,7 @@ int demod_step(struct demod_state *s, const float complex *in)
      * later would cancel catastrophically on strong clean tones. The floor
      * is cached; demod_snr() and demod_soft_llrs() never rescan. */
     float mmax = 0, m2 = -1.0f;
-    int max = 0, second = 0;
+    int max = 0;
     for (uint32_t i = 0; i < s->number_of_bins; i++)
     {
         float m = s->cx_out[i].r * s->cx_out[i].r + s->cx_out[i].i * s->cx_out[i].i;
@@ -129,14 +128,12 @@ int demod_step(struct demod_state *s, const float complex *in)
         if (m > mmax)
         {
             m2 = mmax;
-            second = max;
             mmax = m;
             max = (int)i;
         }
         else if (m > m2)
         {
             m2 = m;
-            second = (int)i;
         }
     }
     uint32_t n = s->number_of_bins;
@@ -148,28 +145,9 @@ int demod_step(struct demod_state *s, const float complex *in)
         if (++b == n)
             b = 0;
     }
-    s->bin_idx = max;
     s->symbol_val = (int)util_mod(max - 1, s->number_of_bins);
     s->peak_mag = mmax;
     s->noise_floor = nsum / (float)(n - (2 * DEMOD_SNR_BLANK + 1));
-    s->second_idx = second;
-
-    { // TRACE: argmax bin, runner-up, margin (small ratio = noise-decided pick)
-        static int call = 0;
-
-        log_trace(
-            "demod[%d]: peak=%d mag=%.3e  2nd=%d mag=%.3e  ratio=%.4f"
-            "  -> symbol=%d\n",
-            call,
-            max,
-            sqrt(s->fft_mag[max]),
-            second,
-            sqrt(s->fft_mag[second]),
-            sqrt(s->fft_mag[second] / s->fft_mag[max]),
-            s->symbol_val);
-
-        call++;
-    }
 
     return s->symbol_val;
 }

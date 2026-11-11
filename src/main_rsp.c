@@ -200,7 +200,7 @@ int main(int argc, char **argv)
             break;
         default:
             usage();
-            return opt == 'h' ? 0 : 1;
+            return 1;
         }
     }
 

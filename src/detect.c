@@ -131,17 +131,9 @@ static int get_symbol_val_detect(
  * spectra, half-bin tie-break. */
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:505-539; [gr-lora] demod_impl.cc:247.
-int frame_sync_detect_step(
-    struct frame_sync *s, const float complex *in, int64_t *advance, struct frame_sync_status *st)
+int frame_sync_detect_step(struct frame_sync *s, const float complex *in, int64_t *advance)
 {
     *advance = 0;
-
-    if (s->phase != FS_DETECT)
-    {
-        if (st)
-            frame_sync_status(s, st);
-        return 1;
-    }
 
     frame_sync_downsample_prologue(s, in, s->in_down);
 
@@ -185,11 +177,7 @@ int frame_sync_detect_step(
         s->k_hat =
             util_most_frequent(s->preamb_up_vals, s->n_up_req, s->number_of_bins, s->mode_hash);
         if (s->k_hat < 0)
-        {
-            if (st)
-                frame_sync_status(s, st);
             return -1;
-        }
 
         struct sfd_result sfd;
         if (!sfd_locate(s, in, &sfd))
@@ -197,8 +185,6 @@ int frame_sync_detect_step(
             // no SFD behind the fire; 0 = the receiver consumes one window
             memcpy(s->preamble_raw, s->in_down, s->number_of_bins * sizeof(*s->in_down));
             s->symbol_cnt = 1;
-            if (st)
-                frame_sync_status(s, st);
             return 0;
         }
 
@@ -218,12 +204,8 @@ int frame_sync_detect_step(
             &in[s->coarse_consume - sps64 / 4],
             (size_t)(s->samples_per_symbol / 4) * sizeof(*s->net_id_samp));
         *advance = s->coarse_consume;
-        if (st)
-            frame_sync_status(s, st);
         return 1;
     }
 
-    if (st)
-        frame_sync_status(s, st);
     return 0;
 }

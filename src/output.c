@@ -34,9 +34,6 @@ void output_frame(const struct output_record *rec)
 {
     char b64[384] = {0}; // max 341 used
 
-    if (!rec)
-        return;
-
     if (!rec->packet || b64_encode(rec->packet, rec->len, b64, sizeof(b64)) != 0)
         b64[0] = '\0';
 

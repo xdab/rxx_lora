@@ -79,12 +79,11 @@ static int nearest_gain(rtlsdr_dev_t *dev, int target_tenths)
 {
     int gains[RTL_MAX_TUNER_GAINS];
 
-    int count = rtlsdr_get_tuner_gains(dev, NULL);
+    int count = rtlsdr_get_tuner_gains(dev, gains);
     if (count <= 0)
         return target_tenths;
     if (count > RTL_MAX_TUNER_GAINS)
         count = RTL_MAX_TUNER_GAINS;
-    count = rtlsdr_get_tuner_gains(dev, gains);
 
     int best = gains[0];
     for (int i = 1; i < count; i++)

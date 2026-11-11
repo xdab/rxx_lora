@@ -661,8 +661,6 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
 
     memset(r, 0, sizeof(*r));
     r->t_edge = -1;
-    r->lam = -HUGE_VALF;
-    r->margin = -HUGE_VALF;
 
     float u_hat, d_hat;
     int q_hat;
@@ -683,11 +681,6 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
     r->t_edge = cands[best].base;
     // tau's rounding residue, for full-precision window placement
     r->t_frac = (float)(int)lroundf(cands[best].tau * (float)os) - cands[best].tau * (float)os;
-    r->q = q_hat;
-    r->u = u_hat;
-    r->d = d_hat;
-    r->tau = cands[best].tau;
-    r->f = cands[best].u; // on the re-timed grid tau ~= 0: u is f
 
     if (s->sync_words[0] != 0 && cands[best].lam < SFD_LAM_GATE)
     {
@@ -697,8 +690,8 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
             margin,
             u_hat,
             d_hat,
-            r->tau,
-            r->f);
+            cands[best].tau,
+            cands[best].u);
         return 0;
     }
 
@@ -706,14 +699,12 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
         "sfd: q=%d edge=%lld tau=%.2f u=%.2f d=%.2f f=%.2f lam=%.1f margin=%.1f\n",
         q_hat,
         (long long)r->t_edge,
-        r->tau,
+        cands[best].tau,
         u_hat,
         d_hat,
-        r->f,
+        cands[best].u, // on the re-timed grid tau ~= 0: u is f
         cands[best].lam,
         margin);
 
-    r->lam = cands[best].lam;
-    r->margin = margin;
     return 1;
 }

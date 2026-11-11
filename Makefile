@@ -22,6 +22,13 @@ OBJ_DIR := obj/exp
 TARGET_SUFFIX := .exp
 endif
 
+# make cov: -O0 gcov build for branch/line coverage maps, obj/cov, *.cov
+ifeq ($(COVERAGE),1)
+CFLAGS += -O0 -g --coverage
+OBJ_DIR := obj/cov
+TARGET_SUFFIX := .cov
+endif
+
 # Entry points and device backends are per-binary; everything else is shared core
 ENTRY_SRC := $(SRC_DIR)/main_file.c $(SRC_DIR)/main_rtl.c $(SRC_DIR)/main_rsp.c
 DEV_SRC := $(SRC_DIR)/device_file.c $(SRC_DIR)/device_rtl.c $(SRC_DIR)/device_rsp.c
@@ -81,6 +88,10 @@ profile:
 .PHONY: experimental
 experimental:
 	$(MAKE) EXPERIMENTAL=1 all
+
+.PHONY: cov
+cov:
+	$(MAKE) COVERAGE=1 file
 
 # clangd reads compile_commands.json; regenerate after adding sources or
 # changing CFLAGS, then restart the language server

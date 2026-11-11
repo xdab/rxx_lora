@@ -9,24 +9,22 @@
 
 struct resampler
 {
-    unsigned m;         // prototype semi-length: taps per branch = 2m
-    unsigned npfb;      // number of polyphase branches
-    unsigned h_sub;     // taps per branch = 2m
-    float *coef;        // npfb*h_sub branch taps, row i oldest-tap-first
-    float *coef_d;      // npfb*h_sub tap deltas, d[i][k] = h[i+1][k] - h[i][k]:
-                        // the mix kernel forms h0 + mu*d with one FMA
-    float *w_re, *w_im; // circular delay line, split re/im, mirrored to
-                        // 2*h_sub slots: a (w_pos .. +h_sub) window never wraps
-    unsigned w_pos;     // delay-line write position; slot w_pos is the oldest
-    float rate;         // output/input sample rate
-    float del;          // timing step per output = 1/rate
-    float tau;          // accumulated timing phase
-    float bf;           // soft branch index = tau*npfb
-    int b;              // base branch index floor(bf)
-    float mu;           // fractional branch index bf-b
-    int state;          // RESAMP_BOUNDARY or RESAMP_INTERP
-    float complex (*f_out)(const struct resampler *, int);        // branch kernel pair,
-    float complex (*f_mix)(const struct resampler *, int, float); // h_sub-specialized
+    unsigned m;           // prototype semi-length: taps per branch = 2m
+    unsigned npfb;        // number of polyphase branches
+    unsigned h_sub;       // taps per branch = 2m
+    float *coef;          // npfb*h_sub branch taps, row i oldest-tap-first
+    float *coef_d;        // npfb*h_sub tap deltas, d[i][k] = h[i+1][k] - h[i][k]:
+                          // the mix kernel forms h0 + mu*d with one FMA
+    float *w_re, *w_im;   // circular delay line, split re/im, mirrored to
+                          // 2*h_sub slots: a (w_pos .. +h_sub) window never wraps
+    unsigned w_pos;       // delay-line write position; slot w_pos is the oldest
+    float rate;           // output/input sample rate
+    float del;            // timing step per output = 1/rate
+    float tau;            // accumulated timing phase
+    float bf;             // soft branch index = tau*npfb
+    int b;                // base branch index floor(bf)
+    float mu;             // fractional branch index bf-b
+    int state;            // RESAMP_BOUNDARY or RESAMP_INTERP
     float complex y0, y1; // branch outputs bracketing the current phase
     size_t delay;         // leading output samples dropped (the group delay)
     size_t drained;       // leading outputs seen; only read during the
@@ -40,8 +38,7 @@ enum
     RESAMP_INTERP,   // regular interpolation
 };
 
-/* Fixed-8-tap kernels: constant bound, contiguous window; the generic loops
- * cover every other h_sub. */
+/* Fixed-8-tap kernels: constant bound, contiguous window. */
 static float complex branch_out_8(const struct resampler *rs, int i)
 {
     const float *h = rs->coef + (size_t)i * 8;
@@ -86,45 +83,6 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
     return ar + ai * I;
 }
 
-// One polyphase branch: FIR of the decimated prototype against the delay line
-static float complex branch_out(const struct resampler *rs, int i)
-{
-    const float *h = rs->coef + (size_t)i * rs->h_sub;
-    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
-    float ar = 0, ai = 0;
-
-    for (unsigned k = 0; k < rs->h_sub; k++)
-    {
-        ar += h[k] * xr[k];
-        ai += h[k] * xi[k];
-    }
-
-    return ar + ai * I;
-}
-
-/* Branch pair (i, i+1) mixed at mu, then one FIR pass: the linear output
- * interpolation of the arbitrary phase is algebraically the same MAC over
- * the interpolated taps — half the complex work, exact (no mu quantize).
- * Only valid for i + 1 < npfb (the INTERP path; the BOUNDARY pair spans
- * executes and keeps the two-branch form). */
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (branch, mix) distinct types at call sites
-static float complex branch_mix(const struct resampler *rs, int i, float mu)
-{
-    const float *h0 = rs->coef + (size_t)i * rs->h_sub;
-    const float *h1 = h0 + rs->h_sub;
-    const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
-    float ar = 0, ai = 0;
-
-    for (unsigned k = 0; k < rs->h_sub; k++)
-    {
-        float h = h0[k] + mu * (h1[k] - h0[k]);
-        ar += h * xr[k];
-        ai += h * xi[k];
-    }
-
-    return ar + ai * I;
-}
-
 static void push_sample(struct resampler *rs, float complex x)
 {
     // overwrite the oldest slots (mirrored ahead — keeps kernel windows contiguous)
@@ -160,7 +118,7 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
     // below is pure INTERP
     if (rs->state == RESAMP_BOUNDARY)
     {
-        rs->y1 = rs->f_out(rs, 0);
+        rs->y1 = branch_out_8(rs, 0);
         y[n++] = (1.0f - mu) * rs->y0 + mu * rs->y1;
         update_timing(rs, &tau, &bf, &b, &mu);
         rs->state = RESAMP_INTERP;
@@ -168,13 +126,13 @@ static unsigned execute(struct resampler *rs, float complex x, float complex *y)
 
     while (b < (int)rs->npfb - 1)
     {
-        y[n++] = rs->f_mix(rs, b, mu);
+        y[n++] = branch_mix_8(rs, b, mu);
         update_timing(rs, &tau, &bf, &b, &mu);
     }
 
     if (b == (int)rs->npfb - 1)
     { // last branch: the next sample must arrive to interpolate
-        rs->y0 = rs->f_out(rs, b);
+        rs->y0 = branch_out_8(rs, b);
         rs->state = RESAMP_BOUNDARY;
         b = (int)rs->npfb;
     }
@@ -217,33 +175,9 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     unsigned as = 60;
     unsigned npfb = 64;
 
-#if RXX_EXPERIMENTAL // env-var overrides for filter experiments
-    {
-        const char *e = getenv("RESAMP_M");
-        if (e)
-            m = (unsigned)atoi(e);
-        e = getenv("RESAMP_AS");
-        if (e)
-            as = (unsigned)atof(e);
-        e = getenv("RESAMP_NPFB");
-        if (e)
-            npfb = (unsigned)atoi(e);
-        e = getenv("RESAMP_BW");
-        if (e)
-            bw_rel = (float)atof(e);
-    }
-#endif
-
     float fc = 0.5f * bw_rel;
     if (!(fc > 0.0f) || fc > fc_max)
         fc = fc_max;
-
-    if (m < 1 || npfb < 1)
-    {
-        log_error("resampler: m and npfb must be positive (m %u, npfb %u)\n", m, npfb);
-        free(rs);
-        return NULL;
-    }
 
     /* Kaiser-windowed sinc prototype, npfb times oversampled: the cutoff is
      * fc/npfb at the interpolated rate. Branch i's taps are the prototype
@@ -254,16 +188,6 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     rs->rate = rate;
     rs->del = 1.0f / rate;
     rs->state = RESAMP_INTERP; // start mid-bank, like a fresh arbitrary resampler
-    if (rs->h_sub == 8)
-    {
-        rs->f_out = branch_out_8;
-        rs->f_mix = branch_mix_8;
-    }
-    else
-    {
-        rs->f_out = branch_out;
-        rs->f_mix = branch_mix;
-    }
 
     unsigned n = 2 * m * npfb + 1;
     float *hf = malloc(n * sizeof(*hf));

@@ -93,13 +93,11 @@ void frame_sync_destroy(struct frame_sync *fs);
  * @param[out] advance on a fire: samples to skip to the first scanned window
  *             (possibly negative; the sync word may start inside the fire
  *             window), untouched otherwise
- * @param[out] st optional: a status snapshot as of this step's return
  * @return 1 when the detector fires, 0 while hunting, -1 on error
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:505-539; [gr-lora] demod_impl.cc:247.
  */
-int frame_sync_detect_step(
-    struct frame_sync *fs, const float complex *in, int64_t *advance, struct frame_sync_status *st);
+int frame_sync_detect_step(struct frame_sync *fs, const float complex *in, int64_t *advance);
 
 /**
  * @brief Run one SYNC step over the next symbol window.
@@ -112,17 +110,12 @@ int frame_sync_detect_step(
  * @param[in] in window start; 2 * samples_per_symbol samples must be readable
  * @param[out] advance once the sync word is accepted: samples to the first
  *             payload window; 0 while walking or on a mismatch
- * @param[out] st optional: a status snapshot as of this step's return
  * @return 1 once the sync word is accepted, 0 while walking, -1 on a
  *         sync-word mismatch (the state resets to DETECT)
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:545; [gr-lora] demod_impl.cc:279.
  */
-int frame_sync_sync_step(
-    struct frame_sync *fs,
-    const float complex *in,
-    uint32_t *advance,
-    struct frame_sync_status *st);
+int frame_sync_sync_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);
 
 /**
  * @brief Produce the next SFO-corrected payload window for demodulation.
@@ -133,17 +126,13 @@ int frame_sync_sync_step(
  *
  * @param[in] in window start; 2 * samples_per_symbol samples must be readable
  * @param[out] advance samples to move past the returned window
- * @param[out] st optional: a status snapshot as of this step's return
  * @return the corrected window (valid until the next call), or NULL when the
  *         symbol budget is spent
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:845.
  */
-const float complex *frame_sync_output_step(
-    struct frame_sync *fs,
-    const float complex *in,
-    uint32_t *advance,
-    struct frame_sync_status *st);
+const float complex *
+frame_sync_output_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);
 
 /**
  * @brief Unlock a payload budget of @p symb_numb windows. Called once the

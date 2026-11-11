@@ -145,7 +145,7 @@ static float estimate_sto_frac(struct frame_sync *s)
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:573,625,667
 static void rotate_left(struct frame_sync *s, float complex *v, uint32_t len, uint32_t r)
 {
-    if (r == 0 || r >= len)
+    if (r == 0)
         return;
     memcpy(s->rot_tmp, v, r * sizeof(*v));
     memmove(v, v + r, (len - r) * sizeof(*v));
@@ -579,17 +579,9 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:545-841; [gr-lora] demod_impl.cc:279
-int frame_sync_sync_step(
-    struct frame_sync *s, const float complex *in, uint32_t *advance, struct frame_sync_status *st)
+int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
     *advance = 0;
-
-    if (s->phase != FS_SYNC)
-    {
-        if (st)
-            frame_sync_status(s, st);
-        return 1;
-    }
 
     frame_sync_downsample_prologue(s, in, s->in_down);
 
@@ -696,8 +688,6 @@ int frame_sync_sync_step(
         int early_walk = 0;
         if (netid_verdict(s, start_off, &early_walk))
         { // mismatch: the state is already back in DETECT
-            if (st)
-                frame_sync_status(s, st);
             return -1;
         }
 
@@ -715,7 +705,6 @@ int frame_sync_sync_step(
     }
 
     default:
-        log_error("sync: no sync sub-state, shouldn't happen\n");
         break;
     }
 
@@ -731,14 +720,12 @@ int frame_sync_sync_step(
         }
         *advance = (uint32_t)s->consume; // 1 once the verdict moved us out of SYNC
     }
-    if (st)
-        frame_sync_status(s, st);
     return done;
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:845-871
-const float complex *frame_sync_output_step(
-    struct frame_sync *s, const float complex *in, uint32_t *advance, struct frame_sync_status *st)
+const float complex *
+frame_sync_output_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
     *advance = 0;
 
@@ -766,8 +753,6 @@ const float complex *frame_sync_output_step(
         s->symbol_cnt++;
 
         *advance = s->consume;
-        if (st)
-            frame_sync_status(s, st);
         return s->out_win;
     }
 
