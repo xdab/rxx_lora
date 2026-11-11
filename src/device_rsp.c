@@ -12,6 +12,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "device_stream.h"
 #include "logging.h"
 #include "ring.h"
 
@@ -22,8 +23,6 @@
 #define RSP_RATE_8M 8000000
 
 #define RSP_RING_SECONDS 2.0
-#define RSP_REPORT_SECONDS 60.0
-#define RSP_LOSS_PPM 1000.0 // warn above 0.1%
 
 /* Drop the first 300 ms after sdrplay_api_Init: DC-offset calibration
  * transient (zero-IF), far louder than anything decodeable. */
@@ -51,29 +50,13 @@ struct rsp_device
     int api_open;                 // sdrplay_api_Open succeeded
     FILE *record;                 // -R: raw cf32 tee, NULL when not recording
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond;
-    struct ring *ring;               // buffered device samples, oldest first
-    size_t ring_cap;                 // soft bound; the oldest samples are dropped beyond it
+    struct stream st;                // shared back-end plumbing (device_stream.h)
     float complex *conv;             // callback scratch: 16-bit pairs -> cf32
     unsigned long long startup_drop; // samples of the calibration transient left
-    unsigned long long delivered;    // samples received from the device
-    unsigned long long dropped;      // samples lost to a full ring
-    double open_time;                // device-open reference for the delivered rate
-    double report_time;
 };
 
 static sdrplay_api_DeviceT rsp_devices[SDRPLAY_MAX_DEVICES];
 static unsigned int rsp_num_devices;
-
-static double mono_seconds(void)
-{
-    struct timespec t;
-
-    clock_gettime(CLOCK_MONOTONIC, &t);
-
-    return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
-}
 
 static uint32_t snap_rate(double want)
 {
@@ -88,9 +71,9 @@ static void rsp_fail(struct rsp_device *s, const char *why)
 {
     log_error("RSP: %s\n", why);
     s->failed = 1;
-    pthread_mutex_lock(&s->lock);
-    pthread_cond_broadcast(&s->cond);
-    pthread_mutex_unlock(&s->lock);
+    pthread_mutex_lock(&s->st.lock);
+    pthread_cond_broadcast(&s->st.cond);
+    pthread_mutex_unlock(&s->st.lock);
 }
 
 /* Called on the API's stream thread with zero-IF samples. The 8 MHz ADC +
@@ -127,18 +110,13 @@ static void rsp_stream_cb(
     }
 
     size_t m = num_samples;
-    pthread_mutex_lock(&s->lock);
-    if (ring_len(s->ring) + m > s->ring_cap)
-    {
-        size_t drop = ring_len(s->ring) + m - s->ring_cap;
-        ring_drop(s->ring, drop);
-        s->dropped += drop;
-    }
+    pthread_mutex_lock(&s->st.lock);
+    stream_make_room(&s->st, m);
 
-    if (ring_reserve(s->ring, m) != 0)
+    if (ring_reserve(s->st.ring, m) != 0)
     {
-        s->dropped += m;
-        pthread_mutex_unlock(&s->lock);
+        s->st.dropped += m;
+        pthread_mutex_unlock(&s->st.lock);
         return;
     }
 
@@ -152,7 +130,7 @@ static void rsp_stream_cb(
             float im = (float)xq[off + i] * (1.0f / 32768.0f);
             s->conv[i] = re + I * im;
         }
-        ring_write(s->ring, s->conv, take);
+        ring_write(s->st.ring, s->conv, take);
         if (s->record && fwrite(s->conv, sizeof(*s->conv), take, s->record) != take)
         {
             log_warn("IQ recording write failed; recording stopped\n");
@@ -161,38 +139,13 @@ static void rsp_stream_cb(
         }
     }
 
-    s->delivered += m;
+    s->st.delivered += m;
 
     double now = mono_seconds();
-    if (now - s->report_time >= RSP_REPORT_SECONDS)
-    {
-        double elapsed = now - s->open_time;
-        double want = s->rate * elapsed;
-        double ppm = want > 0.0 ? 1e6 * (want - (double)s->delivered) / want : 0.0;
-        if (s->dropped)
-            log_warn(
-                "RSP stream: %.0f samples/s over %.0f s, ring drops %llu: "
-                "samples were lost to a full buffer\n",
-                (double)s->delivered / elapsed,
-                elapsed,
-                s->dropped);
-        else if (elapsed > 300.0 && ppm > RSP_LOSS_PPM)
-            log_warn(
-                "RSP stream short by %.0f samples over %.0f s (%.0f ppm): "
-                "the device dropped samples\n",
-                want - (double)s->delivered,
-                elapsed,
-                ppm);
-        else
-            log_info(
-                "RSP stream: %.0f samples/s over %.0f s (%.0f ppm vs nominal)\n",
-                (double)s->delivered / elapsed,
-                elapsed,
-                ppm);
-        s->report_time = now;
-    }
-    pthread_cond_signal(&s->cond);
-    pthread_mutex_unlock(&s->lock);
+    if (now - s->st.report_time >= STREAM_REPORT_SECONDS)
+        stream_report(&s->st, "RSP", STREAM_LOSS_PPM);
+    pthread_cond_signal(&s->st.cond);
+    pthread_mutex_unlock(&s->st.lock);
 }
 
 /* Runs on the API's event thread; the power-overload ack must be issued
@@ -241,30 +194,7 @@ static size_t rsp_read(struct device *d, float complex *out, size_t n)
 {
     struct rsp_device *s = (struct rsp_device *)d;
 
-    pthread_mutex_lock(&s->lock);
-    while (ring_len(s->ring) == 0 && !s->stop && !s->failed)
-    {
-        struct timespec deadline;
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_nsec += 100000000; // 100 ms: notice a stop without a wakeup
-        if (deadline.tv_nsec >= 1000000000)
-        {
-            deadline.tv_sec++;
-            deadline.tv_nsec -= 1000000000;
-        }
-        pthread_cond_timedwait(&s->cond, &s->lock, &deadline);
-    }
-    size_t m = s->stop ? 0 : ring_len(s->ring);
-    if (m > n)
-        m = n;
-    if (m)
-    {
-        memcpy(out, ring_peek(s->ring, 0), m * sizeof(*out));
-        ring_drop(s->ring, m);
-    }
-    pthread_mutex_unlock(&s->lock);
-
-    return m;
+    return stream_read(&s->st, &s->stop, &s->failed, out, n);
 }
 
 static double rsp_rate(const struct device *d) { return ((const struct rsp_device *)d)->rate; }
@@ -273,9 +203,7 @@ static void rsp_stop(struct device *d) { ((struct rsp_device *)d)->stop = 1; }
 
 static void rsp_free(struct rsp_device *s)
 {
-    pthread_cond_destroy(&s->cond);
-    pthread_mutex_destroy(&s->lock);
-    ring_destroy(s->ring);
+    stream_free(&s->st);
     free(s->conv);
     free(s);
 }
@@ -469,13 +397,13 @@ struct device *device_open_rsp(
         ch->ctrlParams.decimation.wideBandSignal = 0;
     }
 
-    pthread_mutex_init(&s->lock, NULL);
-    pthread_cond_init(&s->cond, NULL);
-    s->ring_cap = (size_t)(rate * RSP_RING_SECONDS);
-    s->ring = ring_create(1 << 16, s->ring_cap);
+    pthread_mutex_init(&s->st.lock, NULL);
+    pthread_cond_init(&s->st.cond, NULL);
+    s->st.ring_cap = (size_t)(rate * RSP_RING_SECONDS);
+    s->st.ring = ring_create(1 << 16, s->st.ring_cap);
     s->conv = malloc(RSP_CONV_SAMPLES * sizeof(*s->conv));
 
-    if (!s->ring || !s->conv)
+    if (!s->st.ring || !s->conv)
     {
         log_error("out of memory buffering the RSP stream\n");
         goto fail;
@@ -494,7 +422,8 @@ struct device *device_open_rsp(
     s->base.ops = &rsp_ops;
     s->rate = rate;
     s->startup_drop = (unsigned long long)(rate * RSP_STARTUP_DROP_SECONDS);
-    s->open_time = s->report_time = mono_seconds();
+    s->st.rate = rate;
+    s->st.open_time = s->st.report_time = mono_seconds();
 
     sdrplay_api_CallbackFnsT cb = {0};
     cb.StreamACbFn = rsp_stream_cb;
@@ -526,7 +455,7 @@ fail:
         (void)sdrplay_api_ReleaseDevice(&s->info);
     if (s->api_open)
         (void)sdrplay_api_Close();
-    if (s->ring || s->conv) // ring/conv allocs imply the mutex/cond exist
+    if (s->st.ring || s->conv) // ring/conv allocs imply the mutex/cond exist
         rsp_free(s);
     else
         free(s);
