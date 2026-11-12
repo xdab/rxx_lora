@@ -20,7 +20,6 @@ struct source
     long off;             // absolute position of the oldest buffered sample; opens at -slack
     size_t slack;         // retained history behind the scan, and the end-of-stream pad
     long total;           // data length once the stream has ended (before padding)
-    double rate_in;       // device (input/file) rate, for source_input_sample
     double rate_out;      // working rate bw*os
     int eof;
     int err;            // allocation failure: folds into the end-of-stream return
@@ -53,6 +52,17 @@ static int source_eof_pad(struct source *s, size_t need)
  * allocation failed (`err`). The final filter-tail samples of a finite
  * resampled stream are not driven out here; the zero pad covers the
  * look-ahead they would have filled. */
+
+// conj / dc-block pre-processing, applied in place on a fresh read
+static void apply_pre(struct source *s, float complex *x, size_t n)
+{
+    if (s->conj)
+        for (size_t i = 0; i < n; i++)
+            x[i] = conjf(x[i]);
+
+    if (s->dc_block_on)
+        dc_block_apply(&s->dc, x, n);
+}
 static int source_fill(struct source *s, size_t need)
 {
     if (s->err)
@@ -74,12 +84,7 @@ static int source_fill(struct source *s, size_t need)
             if (nr == 0)
                 return source_eof_pad(s, need);
 
-            if (s->conj)
-                for (size_t i = 0; i < nr; i++)
-                    in[i] = conjf(in[i]);
-
-            if (s->dc_block_on)
-                dc_block_apply(&s->dc, in, nr);
+            apply_pre(s, in, nr);
 
             size_t space = resampler_push_space(s->rs, nr) + 1;
             if (ring_reserve(s->ring, space) != 0)
@@ -106,12 +111,7 @@ static int source_fill(struct source *s, size_t need)
             if (nr == 0)
                 return source_eof_pad(s, need);
 
-            if (s->conj)
-                for (size_t i = 0; i < nr; i++)
-                    span[i] = conjf(span[i]);
-
-            if (s->dc_block_on)
-                dc_block_apply(&s->dc, span, nr);
+            apply_pre(s, span, nr);
 
             ring_commit(s->ring, nr);
         }
@@ -165,7 +165,6 @@ source_create(struct device *dev, int sf, int os, double bandwidth, int conj, in
     if (dev_rate <= 0.0)
         dev_rate = rate_target;
 
-    s->rate_in = dev_rate;
     s->rate_out = rate_target;
 
     /* Strip the zero-IF tuner's DC offset and 1/f junk at the device rate,
@@ -210,21 +209,6 @@ void source_advance(struct source *s, size_t pos)
         ring_drop(s->ring, (size_t)(keep - s->off));
         s->off = keep;
     }
-}
-
-size_t source_input_sample(const struct source *s, size_t pos)
-{
-    if (!s->rs)
-        return pos;
-
-    return (size_t)llround((double)pos * s->rate_in / s->rate_out);
-}
-
-/* Wall-clock offset of an absolute working-grid position from the start of
- * the stream, in seconds (pos/rate_out == input_sample/rate_in). */
-double source_time_seconds(const struct source *s, size_t pos)
-{
-    return s->rate_out > 0.0 ? (double)pos / s->rate_out : 0.0;
 }
 
 int source_failed(const struct source *s) { return s->err; }

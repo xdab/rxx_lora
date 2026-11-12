@@ -66,6 +66,26 @@ void dc_block_init(struct dc_block *d, double rate_hz, double corner_hz);
 void dc_block_apply(struct dc_block *d, float complex *x, size_t n);
 
 /**
+ * @brief Dechirp @p n samples by @p ref and pack into the split-field FFT
+ *        input layout (dsp_cpx).
+ */
+void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n);
+
+/**
+ * @brief Design an @p nt-tap sinc FIR at the fixed spacing @p step
+ *        (h[t] = step*sinc(step*(t - nt/2)) windowed, sum-normalized).
+ *        @p beta > 0 selects a Kaiser window, 0 a Hamming one. @p h holds
+ *        nt coefficients; taps past nt the caller keeps zeroed.
+ */
+void dsp_sinc_fir(float *h, unsigned nt, float step, float beta);
+
+/**
+ * @brief Modified Bessel function of the first kind, order 0 — the Kaiser
+ *        window's denominator and taper.
+ */
+float dsp_bessel_i0(float x);
+
+/**
  * @brief Design an @p n-tap Kaiser-windowed sinc low-pass prototype, writing
  *        @p n coefficients to @p h (unnormalized; the caller applies any gain).
  *

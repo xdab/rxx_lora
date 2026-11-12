@@ -14,8 +14,6 @@
  */
 struct ring;
 
-struct ring;
-
 /**
  * Create an empty ring; `chunk` is the dead-prefix size (samples) that
  * triggers a compaction. `cap` pre-allocates the storage; 0 defers it to the

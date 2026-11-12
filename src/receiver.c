@@ -35,25 +35,9 @@
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
 
 /* Rewind depth past a bad frame's fire, in whole symbol windows. Deeper skips
- * cut the re-decode cycles on noise spans but can step over a real preamble
- * hiding within SKIP windows of the fire. Experimental sweep: REWIND_SKIP. */
+ * re-decode less but can step over a real preamble hiding within SKIP windows
+ * of the fire. */
 #define REWIND_SKIP_SYMS 4
-
-static unsigned rewind_skip_syms(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: rewind depth past a bad fire
-    static unsigned cached;
-    if (!cached)
-    {
-        const char *e = getenv("REWIND_SKIP");
-        long v = e ? strtol(e, NULL, 10) : REWIND_SKIP_SYMS;
-        cached = v < 1 || v > 10 ? (unsigned)REWIND_SKIP_SYMS : (unsigned)v;
-    }
-    return cached;
-#else
-    return REWIND_SKIP_SYMS;
-#endif
-}
 #define MAX_BYTES 255 // the PHY length field is one byte
 
 struct receiver
@@ -62,7 +46,6 @@ struct receiver
     struct demod_state demod; // allocated once, reset per frame
     struct chase_config chase;
     int report_crc_bad; // emit CRC-invalid frames on stdout (--report-bad)
-    int sf;
 };
 
 // outcome of one frame, one value per termination path
@@ -81,7 +64,6 @@ struct frame_result
     uint8_t bytes[MAX_BYTES];
     uint32_t len;
     int has_crc;
-    uint8_t cr;   // coding rate 4/(4+cr), 1..4
     float snr_db; // header symbols' mean on-channel SNR
 };
 
@@ -92,10 +74,8 @@ struct frame_result
  */
 static void log_input_sample(struct source *src, size_t pos)
 {
-    log_debug(
-        "input sample %zu (%.3f s)\n",
-        source_input_sample(src, pos),
-        source_time_seconds(src, pos));
+    (void)src;
+    log_debug("grid sample %zu\n", pos);
 }
 
 /*
@@ -113,10 +93,12 @@ static int next_symbol(
 {
     const float complex *w = source_window(src, *pos, *pos + st->samples_per_symbol);
     uint32_t advance;
-    const float complex *out = w ? frame_sync_output_step(fs, w, &advance, st) : NULL;
+    const float complex *out = w ? frame_sync_output_step(fs, w, &advance) : NULL;
 
     if (!out)
         return -1;
+
+    frame_sync_status(fs, st);
 
     (void)demod_step(fd, out); // hard value unused: soft only
     demod_soft_llrs(fd, llr);
@@ -142,11 +124,12 @@ struct cw_suspect
  * @param suspects optionally receives each codeword's runner-up record;
  *        NULL skips
  *
- * @return the number of nibbles written, or -1 on a malformed block size
+ * @return the number of nibbles written
  */
 static int decode_block(
     const float (*sym_llr)[MAX_SF],
     int n_sym,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors deinterleave_soft's signature
     int n_cw,
     int cr,
     uint8_t *nib,
@@ -155,9 +138,9 @@ static int decode_block(
     float cw_llr[MAX_SF][MAX_SF];
     int i;
 
-    if (n_sym < 1 || n_sym > HEADER_SYMBOLS || n_cw < 1 || n_cw > MAX_SF || cr < 1 || cr > 4)
-        return -1;
-
+    // n_sym/n_cw/cr arrive as literals or header-validated values (header.c
+    // rejects cr outside 1..4); deinterleave_soft's stack blocks are sized
+    // for the maxima above
     deinterleave_soft(sym_llr, (uint8_t)n_sym, (uint8_t)n_cw, cw_llr);
 
     for (i = 0; i < n_cw; i++)
@@ -183,15 +166,13 @@ static int decode_block(
  * Assemble a completed frame: dewhiten the payload nibbles, then the CRC
  * verdict. Pure data in, verdict + bytes out — no logging.
  */
-static enum frame_decode finish_frame(
-    const uint8_t *nibs, uint32_t nnib, const struct lora_header *h, struct frame_result *out)
+static enum frame_decode
+finish_frame(const uint8_t *nibs, const struct lora_header *h, struct frame_result *out)
 {
     uint32_t p;
     uint16_t crc_rx, crc_calc;
 
-    if (nnib < 2u * h->pay_len + (h->has_crc ? 4u : 0u))
-        return DECODE_TRUNCATED;
-
+    // both callers only assemble once nnib reached 2*pay_len + the crc nibbles
     dewhiten(nibs, h->pay_len, out->bytes); // payload nibbles only: CRC nibbles stay raw
 
     out->len = h->pay_len;
@@ -223,9 +204,10 @@ static enum frame_decode finish_frame(
  * @return 1 on a rescued frame (out filled), 0 if no combo verified
  */
 #define CHASE_MARG 0.2f // a suspect's margin must be under this share of its LLR mass
+#define CHASE_K 8       // least-reliable codewords considered
+#define CHASE_TAU 1.0f  // max total flip LLR loss to accept
 
 static int chase_retry(
-    const struct chase_config *cc,
     const uint8_t *nibs,
     const struct cw_suspect *suspects,
     uint32_t nnib,
@@ -236,11 +218,10 @@ static int chase_retry(
     uint8_t tmp[2 * MAX_BYTES + 4], used[2 * MAX_BYTES + 4] = {0};
     uint32_t sel[2 * MAX_BYTES + 4];
     struct frame_result res, best_res;
-    float tau = cc->tau;
     float best_loss = 0;
-    int k = cc->k, n_sel = 0, s, t, found = 0;
+    int k = CHASE_K, n_sel = 0, s, t, found = 0;
 
-    if (k < 1 || pay_nib == 0 || pay_nib > nnib)
+    if (pay_nib == 0 || pay_nib > nnib)
         return 0;
     if (pay_nib < (uint32_t)k)
         k = (int)pay_nib;
@@ -275,7 +256,7 @@ static int chase_retry(
         float loss = suspects[sel[s]].marg;
         memcpy(tmp, nibs, nnib);
         tmp[sel[s]] = suspects[sel[s]].alt;
-        if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
+        if (finish_frame(tmp, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
         {
             found = 1;
             best_loss = loss;
@@ -291,7 +272,7 @@ static int chase_retry(
             memcpy(tmp, nibs, nnib);
             tmp[sel[s]] = suspects[sel[s]].alt;
             tmp[sel[t]] = suspects[sel[t]].alt;
-            if (finish_frame(tmp, nnib, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
+            if (finish_frame(tmp, h, &res) == DECODE_CRC_OK && (!found || loss < best_loss))
             {
                 found = 1;
                 best_loss = loss;
@@ -299,7 +280,7 @@ static int chase_retry(
             }
         }
 
-    if (!found || (tau >= 0 && best_loss > tau))
+    if (!found || best_loss > CHASE_TAU)
         return 0;
     *out = best_res;
     log_info("chase: rescued, flip LLR loss %.1f\n", (double)best_loss);
@@ -358,8 +339,6 @@ static enum frame_decode decode_frame(
         return DECODE_HEADER;
     }
 
-    out->cr = h.cr;
-
     // explicit unsigned: uint8_t promotes to int, which is UB for %u
     log_info(
         "header: pay_len=%u cr=4/%u crc=%d snr=%+.1f dB\n",
@@ -376,7 +355,10 @@ static enum frame_decode decode_frame(
     // caller-side handshake: unlock the payload budget
     frame_sync_set_symbol_budget(fs, decode_symbol_budget(h.pay_len, h.cr, h.has_crc, sf));
 
-    // payload blocks of cr+4 symbols -> sf nibbles each, soft-decoded
+    // payload blocks of cr+4 symbols -> sf nibbles each, soft-decoded.
+    // Without --chase nothing consumes the suspects: the soft scan runs
+    // plain-argmax and the copies stop
+    const int chase_on = cc->enabled;
     cw_len = (uint8_t)(h.cr + 4);
     needed = 2u * h.pay_len + (h.has_crc ? 4u : 0u);
     while (nnib < needed)
@@ -390,13 +372,12 @@ static enum frame_decode decode_frame(
         if (++nb < cw_len)
             continue;
 
-        n = decode_block(sllr, cw_len, sf, h.cr, pnib, psus);
-        if (n < 0)
-            return DECODE_HEADER;
+        n = decode_block(sllr, cw_len, sf, h.cr, pnib, chase_on ? psus : NULL);
         for (i = 0; i < (uint32_t)n && nnib < needed; i++)
         {
             nibs[nnib] = pnib[i];
-            suspects[nnib] = psus[i];
+            if (chase_on)
+                suspects[nnib] = psus[i];
             nnib++;
         }
         nb = 0;
@@ -407,9 +388,9 @@ static enum frame_decode decode_frame(
         return DECODE_TRUNCATED;
     }
 
-    enum frame_decode verdict = finish_frame(nibs, nnib, &h, out);
+    enum frame_decode verdict = finish_frame(nibs, &h, out);
     if (verdict == DECODE_CRC_BAD && cc->enabled &&
-        chase_retry(cc, nibs, suspects, nnib, 2u * h.pay_len, &h, out))
+        chase_retry(nibs, suspects, nnib, 2u * h.pay_len, &h, out))
         verdict = DECODE_CRC_OK;
     return verdict;
 }
@@ -433,14 +414,8 @@ static int detect_frame(
     while ((w = source_window(src, *pos, *pos + st->samples_per_symbol)))
     {
         int64_t advance = 0;
-        int ret = frame_sync_detect_step(fs, w, &advance, st);
-
-        if (ret < 0)
-        {
-            log_error("detect step failed at %zu\n", *pos);
-            log_input_sample(src, *pos);
-            return -1;
-        }
+        int ret = frame_sync_detect_step(fs, w, &advance);
+        frame_sync_status(fs, st);
 
         if (ret > 0)
         {
@@ -482,7 +457,8 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
     while ((w = source_window(src, *pos, *pos + 2 * (size_t)st->samples_per_symbol)))
     {
         uint32_t advance = 0;
-        int ret = frame_sync_sync_step(fs, w, &advance, st);
+        int ret = frame_sync_sync_step(fs, w, &advance);
+        frame_sync_status(fs, st);
 
         if (ret > 0)
         {
@@ -499,17 +475,6 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
                 *pos);
             log_input_sample(src, *pos);
 
-            int grid_shift = (int)advance - (int)(st->samples_per_symbol / 4);
-            log_trace(
-                "CFO: cfo=%+.4f bins (%.1f Hz) from SFD down_val=%d\n"
-                "CFO: payload grid shift = %d samples (= %+.4f chips, "
-                "1 chip per bin)\n",
-                (double)st->cfo,
-                (double)st->cfo * st->bandwidth / st->number_of_bins,
-                st->down_val,
-                grid_shift,
-                (double)grid_shift / (double)st->os);
-
             return 1;
         }
 
@@ -525,25 +490,37 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
             return 0;
         }
 
-        log_trace(
-            "sync step pos=%zu (input %zu) cnt=%d bin=%d\n",
-            *pos,
-            source_input_sample(src, *pos),
-            st->symbol_cnt,
-            st->bin_idx);
         *pos += st->samples_per_symbol; // SYNC consumes one window per step
     }
+    return 0;
+}
+
+static int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap)
+{
+    static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (4 * ((in_len + 2) / 3) + 1 > out_cap)
+        return -1;
+    size_t o = 0;
+    for (size_t i = 0; i < in_len; i += 3)
+    {
+        uint32_t v = (uint32_t)in[i] << 16;
+        if (i + 1 < in_len)
+            v |= (uint32_t)in[i + 1] << 8;
+        if (i + 2 < in_len)
+            v |= in[i + 2];
+        out[o++] = tab[(v >> 18) & 63];
+        out[o++] = tab[(v >> 12) & 63];
+        out[o++] = i + 1 < in_len ? tab[(v >> 6) & 63] : '=';
+        out[o++] = i + 2 < in_len ? tab[v & 63] : '=';
+    }
+    out[o] = '\0';
     return 0;
 }
 
 // Report one completed frame: the human verdict on stderr, one JSON line on
 // stdout. crc_valid carries the verdict: 1 valid, 0 invalid, -1 absent.
 static void report_frame(
-    const struct frame_result *res,
-    enum frame_decode verdict,
-    const struct frame_sync_status *st,
-    struct source *src,
-    size_t pos)
+    const struct frame_result *res, enum frame_decode verdict, const struct frame_sync_status *st)
 {
     char b64[384] = {0}; // max 341 used
     struct output_record rec = {0};
@@ -551,20 +528,13 @@ static void report_frame(
     rec.packet = res->bytes;
     rec.len = res->len;
     rec.snr_db = res->snr_db;
-    rec.cr = res->cr;
     rec.crc_present = res->has_crc;
     rec.crc_valid = verdict == DECODE_CRC_OK ? 1 : (verdict == DECODE_CRC_BAD ? 0 : -1);
-    rec.net0 = st->netid_dec[0];
-    rec.net1 = st->netid_dec[1];
-    rec.sync_word = st->sync_word_rx;
     rec.cfo_hz = (double)st->cfo * st->bandwidth / (double)st->number_of_bins;
-    rec.sfo = (double)st->sfo_hat;
-    rec.sto_frac = (double)st->sto_frac;
-    rec.input_sample = source_input_sample(src, pos);
-    rec.time_seconds = source_time_seconds(src, pos);
 
-    if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) == 0)
-        log_info("RX: %s\n", b64);
+    if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) != 0)
+        b64[0] = '\0'; // one encode serves both the stderr line and stdout
+    log_info("RX: %s\n", b64);
 
     if (!rec.crc_present)
         log_info("CRC absent\n");
@@ -573,7 +543,7 @@ static void report_frame(
     else
         log_warn("CRC invalid\n");
 
-    output_frame(&rec);
+    output_frame(&rec, b64);
 }
 
 struct receiver *receiver_create(const struct receiver_config *cfg)
@@ -585,7 +555,6 @@ struct receiver *receiver_create(const struct receiver_config *cfg)
 
     r->chase = cfg->chase;
     r->report_crc_bad = cfg->report_crc_bad;
-    r->sf = cfg->sf;
     r->fs = frame_sync_create(
         (uint8_t)cfg->sf,
         (uint8_t)cfg->os,
@@ -630,22 +599,18 @@ int receiver_run(struct receiver *r, struct source *src)
     int n_crc_ok = 0, n_crc_bad = 0, n_crc_absent = 0;
     int n_header_fail = 0, n_truncated = 0;
 
-    frame_sync_status(fs, &st); // one snapshot, kept fresh by every step below
+    frame_sync_status(fs, &st); // one snapshot, refreshed after every step below
 
     size_t pos = 0;
-    size_t lock_pos = 0; // frame start: where DETECT fired
     size_t fire_pos = 0; // the fire window itself, before the coarse jump
     for (;;)
     {
         size_t frame_pos = pos;
         int detected = detect_frame(src, fs, &pos, &st, &fire_pos);
 
-        if (detected < 0)
-            goto done;
         if (!detected)
             break; // end of stream: nothing more to hunt
         n_locks++;
-        lock_pos = pos;
 
         if (sync_frame(src, fs, &pos, &st))
         {
@@ -660,17 +625,17 @@ int receiver_run(struct receiver *r, struct source *src)
             case DECODE_CRC_OK:
                 n_crc_ok++;
                 n_decoded++;
-                report_frame(&res, verdict, &st, src, lock_pos);
+                report_frame(&res, verdict, &st);
                 break;
             case DECODE_NO_CRC:
                 n_crc_absent++;
                 n_decoded++;
-                report_frame(&res, verdict, &st, src, lock_pos);
+                report_frame(&res, verdict, &st);
                 break;
             case DECODE_CRC_BAD:
                 n_crc_bad++;
                 if (r->report_crc_bad)
-                    report_frame(&res, verdict, &st, src, lock_pos);
+                    report_frame(&res, verdict, &st);
                 break;
             case DECODE_HEADER:
                 n_header_fail++;
@@ -684,7 +649,7 @@ int receiver_run(struct receiver *r, struct source *src)
              * decode: rewind past the fire window and rescan (truncated
              * frames have nothing to recover) */
             if (verdict == DECODE_HEADER || verdict == DECODE_CRC_BAD)
-                pos = fire_pos + (size_t)rewind_skip_syms() * st.samples_per_symbol;
+                pos = fire_pos + (size_t)REWIND_SKIP_SYMS * st.samples_per_symbol;
         }
 
         // rewind for the next frame; the guard keeps the scan moving even if
@@ -695,7 +660,6 @@ int receiver_run(struct receiver *r, struct source *src)
         source_advance(src, pos);
     }
 
-done:
     log_info(
         "stats: locks=%d synced=%d decoded=%d crc_ok=%d crc_bad=%d "
         "crc_absent=%d header_fail=%d truncated=%d\n",

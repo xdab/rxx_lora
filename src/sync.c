@@ -21,6 +21,22 @@
 // recurrences below; bounds the running-multiply |z|=1 drift to ~3e-5.
 #define PHASOR_RESYNC 512
 
+/* Phasor e^{i2pi*rate/n * j} over len entries, restarted exactly every
+ * PHASOR_RESYNC samples so the recurrence cannot drift. */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (len, n) counts vs modulus
+static void build_phasor(float complex *dst, uint32_t len, uint32_t n, float rate)
+{
+    float complex step = cexpf(I * (-2.0f * (float)M_PI * rate / (float)n));
+    float complex z = 1.0f;
+    for (uint32_t j = 0; j < len; j++)
+    {
+        if ((j & (PHASOR_RESYNC - 1)) == 0)
+            z = cexpf(I * (-2.0f * (float)M_PI * rate / (float)n * (float)j));
+        dst[j] = z;
+        z *= step;
+    }
+}
+
 /* Shared with detect.c (see frame_sync_internal.h); returns the offset's
  * fractional part, in bins, in (-0.5, +0.5]. The integer part comes from the
  * SFD downchirp; see frame_sync_sync_step(). */
@@ -31,14 +47,12 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
 
     for (int i = 0; i < ust; i++)
     {
-        // volk_32fc_x2_multiply_32fc
-        for (uint32_t j = 0; j < n; j++)
-            s->est_dechirped[j] = samples[(uint32_t)n * i + j] * s->downchirp[j];
-
+        // volk_32fc_x2_multiply_32fc, fused with the pack into the FFT input
         for (uint32_t j = 0; j < n; j++)
         {
-            s->est_cx_in[j].r = crealf(s->est_dechirped[j]);
-            s->est_cx_in[j].i = cimagf(s->est_dechirped[j]);
+            float complex v = samples[(uint32_t)n * i + j] * s->downchirp[j];
+            s->est_cx_in[j].r = crealf(v);
+            s->est_cx_in[j].i = cimagf(v);
         }
 
         dsp_fft(s->fft_cfg, s->est_cx_in, s->est_cx_out);
@@ -72,19 +86,9 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
                     conjf(s->est_fft_val[idx_max + (uint32_t)n * (i + 1)]);
     float cfo_frac = -cargf(four_cum) / 2.0f / (float)M_PI;
 
-    // deviation: the reference calls cexpf per sample
-    float complex step = cexpf(I * (-2.0f * (float)M_PI * cfo_frac / (float)n));
-    float complex z = 1.0f;
+    build_phasor(s->preamble_upchirps, (uint32_t)ust * n, n, cfo_frac);
     for (uint32_t j = 0; j < (uint32_t)ust * n; j++)
-    {
-        if ((j & (PHASOR_RESYNC - 1)) == 0)
-            z = cexpf(I * (-2.0f * (float)M_PI * cfo_frac / (float)n * (float)j));
-        s->cfo_correc_aug[j] = z;
-        z *= step;
-    }
-
-    for (uint32_t j = 0; j < (uint32_t)ust * n; j++)
-        s->preamble_upchirps[j] = samples[j] * s->cfo_correc_aug[j];
+        s->preamble_upchirps[j] = samples[j] * s->preamble_upchirps[j];
 
     return cfo_frac;
 }
@@ -100,22 +104,8 @@ static float estimate_sto_frac(struct frame_sync *s)
 
     for (int i = 0; i < ust; i++)
     {
-        for (uint32_t j = 0; j < n; j++)
-            s->est_dechirped[j] = s->preamble_upchirps[(uint32_t)n * i + j] * s->downchirp[j];
-
-        for (uint32_t j = 0; j < 2 * n; j++)
-        {
-            if (j < n)
-            {
-                s->est_cx_in[j].r = crealf(s->est_dechirped[j]);
-                s->est_cx_in[j].i = cimagf(s->est_dechirped[j]);
-            }
-            else
-            {
-                s->est_cx_in[j].r = 0;
-                s->est_cx_in[j].i = 0;
-            }
-        }
+        dsp_dechirp_pack(s->est_cx_in, s->preamble_upchirps + (size_t)n * i, s->downchirp, n);
+        memset(&s->est_cx_in[n], 0, n * sizeof(*s->est_cx_in));
 
         dsp_fft(s->est_fft_cfg, s->est_cx_in, s->est_cx_out);
 
@@ -145,7 +135,7 @@ static float estimate_sto_frac(struct frame_sync *s)
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:573,625,667
 static void rotate_left(struct frame_sync *s, float complex *v, uint32_t len, uint32_t r)
 {
-    if (r == 0 || r >= len)
+    if (r == 0)
         return;
     memcpy(s->rot_tmp, v, r * sizeof(*v));
     memmove(v, v + r, (len - r) * sizeof(*v));
@@ -166,14 +156,6 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     int down_signed = ((uint32_t)s->down_val < n / 2) ? s->down_val : s->down_val - (int)n;
     float cfo_coarse = (float)util_round((float)down_signed / 2.0f - s->cfo);
     s->cfo = cfo_coarse + s->cfo; // the estimate is now complete
-
-#if RXX_EXPERIMENTAL // env-var knob: nudge the whole estimate (bins)
-    {
-        const char *e = getenv("RTL_CFO_ADD");
-        if (e)
-            s->cfo += (float)atof(e);
-    }
-#endif
 
     log_trace(
         "cfo: SFD down_val=%d (signed %+d, half-bin grid -> whole bin "
@@ -204,18 +186,9 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     // deviation: geometric progression instead of per-sample cexpf
     int cfo_int = (int)cfo_coarse; // whole bins; the fractional part is twisted below
     rotate_left(s, s->preamble_upchirps, s->preamble_len * n, util_mod(cfo_int, n));
-    uint32_t len1 = (uint32_t)(s->n_up_req + s->additional_upchirps) * n;
-    {
-        float complex step = cexpf(I * (-2.0f * (float)M_PI * cfo_increment / (float)n));
-        float complex z = 1.0f;
-        for (uint32_t j = 0; j < len1; j++)
-        {
-            if ((j & (PHASOR_RESYNC - 1)) == 0)
-                z = cexpf(I * (-2.0f * (float)M_PI * cfo_increment / (float)n * (float)j));
-            s->cfo_correc_long[j] = z;
-            z *= step;
-        }
-    }
+    // only (n_up_req-1)*n entries are ever consumed: the corrected preamble
+    // windows the estimator reads
+    build_phasor(s->cfo_correc_long, (uint32_t)(s->n_up_req - 1) * n, n, cfo_increment);
     for (uint32_t j = 0; j < (uint32_t)(s->n_up_req - 1) * n; j++)
         s->preamble_upchirps[j] *= s->cfo_correc_long[j];
 
@@ -229,22 +202,18 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     s->sfo_hat =
         (s->center_freq != 0) ? (s->cfo * (float)s->bandwidth) / (float)s->center_freq : 0.0f;
 
-#if RXX_EXPERIMENTAL // env-var knob: force the SFO estimate (chips/symbol)
+    if (s->sfo_hat != 0.0f)
     {
-        const char *e = getenv("RTL_SFO_SET");
-        if (e)
-            s->sfo_hat = (float)atof(e);
-    }
-#endif
-
-    double clk_off = s->sfo_hat / (float)n;
-    double fs = s->bandwidth;
-    double fs_p = s->bandwidth * (1 - clk_off);
-    double bwpow_p = s->bandwidth / fs_p * s->bandwidth / fs_p;
-    double bwpow = s->bandwidth / fs * s->bandwidth / fs;
-    // deviation: chirp recurrence per block instead of a per-sample
-    // double cexp of a phase quadratic in m = j mod n
-    {
+        // the recurrence below is the identity at sfo_hat == 0 (fs_p == fs
+        // makes A, B0 and Bblk all zero): skip the build and the no-op multiply
+        const uint32_t len1 = (uint32_t)(s->n_up_req - 1) * n;
+        double clk_off = s->sfo_hat / (float)n;
+        double fs = s->bandwidth;
+        double fs_p = s->bandwidth * (1 - clk_off);
+        double bwpow_p = s->bandwidth / fs_p * s->bandwidth / fs_p;
+        double bwpow = s->bandwidth / fs * s->bandwidth / fs;
+        // deviation: chirp recurrence per block instead of a per-sample
+        // double cexp of a phase quadratic in m = j mod n
         double A = -2.0 * M_PI * (bwpow_p - bwpow) / 2.0 / n;
         double Bblk = -2.0 * M_PI * (bwpow_p - s->bandwidth / fs_p); // per-block phase step
         double B0 = -2.0 * M_PI * (s->bandwidth / 2.0 * (1.0 / fs - 1.0 / fs_p));
@@ -264,10 +233,10 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
             blk_z *= blk_step;
             blk_step *= step2;
         }
-    }
 
-    for (uint32_t j = 0; j < (uint32_t)(s->n_up_req - 1) * n; j++)
-        s->preamble_upchirps[j] *= s->sfo_corr_vect[j];
+        for (uint32_t j = 0; j < len1; j++)
+            s->preamble_upchirps[j] *= s->sfo_corr_vect[j];
+    }
 
     return cfo_int;
 }
@@ -332,16 +301,10 @@ static int netid_top_tones(
     return cnt;
 }
 
-static int decode_netid_pair(struct frame_sync *s, int cfo_int)
+static void decode_netid_pair(struct frame_sync *s, int cfo_int)
 {
     const uint32_t n = s->number_of_bins;
 
-    // NOLINTNEXTLINE(bugprone-integer-division) - os / 2 truncation is by design
-    int start_off = (int)((int)s->oversampling_factor / 2 -
-                          util_round(s->sto_frac * (float)s->oversampling_factor) +
-                          s->oversampling_factor * (0.25 * n + cfo_int));
-    /* the pair read applies sto_frac at full fractional precision; the int
-     * start_off above is the trace/verdict grid only */
     // NOLINTNEXTLINE(bugprone-integer-division) - os / 2 truncation is by design
     float base = (float)((int)s->oversampling_factor / 2) -
                  s->sto_frac * (float)s->oversampling_factor +
@@ -362,28 +325,41 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
     }
 
     s->netid_dec[0] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[0], s->downchirp);
+
+    // the top-k scan feeds the worded-mode joint arbitration; accept-any
+    // reads only the argmax pair above. get_symbol_val leaves the scanned
+    // spectrum in fft_mag, so spectrum 0 must be scanned before symbol 1
+    // is demodulated into it
     int bins0[NETID_JOINT_K], bins1[NETID_JOINT_K];
     float mags0[NETID_JOINT_K], mags1[NETID_JOINT_K];
-    float mean0, mean1;
-    int nb0 = netid_top_tones(s, NETID_JOINT_K, bins0, mags0, &mean0);
+    float mean0 = 0.0f, mean1 = 0.0f;
+    int nb0 = 0, nb1 = 0;
+    int worded = s->sync_words[0] != 0 && s->sync_words[1] != 0;
+    if (worded)
+        nb0 = netid_top_tones(s, NETID_JOINT_K, bins0, mags0, &mean0);
+
     s->netid_dec[1] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[n], s->downchirp);
-    int nb1 = netid_top_tones(s, NETID_JOINT_K, bins1, mags1, &mean1);
 
-    log_debug(
-        "netid spec1: %d (%.0f), %d (%.0f), mean %.1f | spec2: %d (%.0f), %d (%.0f), mean %.1f\n",
-        bins0[0],
-        mags0[0],
-        nb0 > 1 ? bins0[1] : -1,
-        nb0 > 1 ? mags0[1] : 0.0f,
-        mean0,
-        bins1[0],
-        mags1[0],
-        nb1 > 1 ? bins1[1] : -1,
-        nb1 > 1 ? mags1[1] : 0.0f,
-        mean1);
+    if (worded)
+    {
+        nb1 = netid_top_tones(s, NETID_JOINT_K, bins1, mags1, &mean1);
+        log_debug(
+            "netid spec1: %d (%.0f), %d (%.0f), mean %.1f | "
+            "spec2: %d (%.0f), %d (%.0f), mean %.1f\n",
+            bins0[0],
+            mags0[0],
+            nb0 > 1 ? bins0[1] : -1,
+            nb0 > 1 ? mags0[1] : 0.0f,
+            mean0,
+            bins1[0],
+            mags1[0],
+            nb1 > 1 ? bins1[1] : -1,
+            nb1 > 1 ? mags1[1] : 0.0f,
+            mean1);
+    }
 
-    if (s->sync_words[0] != 0 && s->sync_words[1] != 0)
-    { /* worded mode: joint pair arbitration, argmax pair as fallback */
+    if (worded)
+    { /* joint pair arbitration, argmax pair as fallback */
         int best0 = -1, best1 = -1, arg0 = -1, arg1 = -1;
         float best_p = -1.0f, best_m0 = 0.0f, best_m1 = 0.0f;
         for (int i = 0; i < nb0; i++)
@@ -435,24 +411,20 @@ static int decode_netid_pair(struct frame_sync *s, int cfo_int)
                 s->netid_dec[0],
                 s->netid_dec[1]);
     }
-
-    return start_off;
 }
 
 /* Verdict on the decoded pair against the expected sync words. On accept,
  * sets s->net_id_off and the grid-correction part of s->consume. On a
  * mismatch, rewinds the state machine to DETECT.
  *
- * @param[in] start_off the decimated pair's grid start, in samples (trace only)
- * @param[out] early_walk set on a one-symbol-early pair, accepted with a
- *             whole symbol of grid advance
+ * The one-symbol-early pair is accepted with a whole symbol of grid advance.
+ *
  * @return 1 to reset (the state is already rewound), 0 to accept
  */
-static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
+static int netid_verdict(struct frame_sync *s)
 {
     const uint32_t n = s->number_of_bins;
     int reset = 0;
-    *early_walk = 0; // the pair legitimately read one symbol low
 
     if (s->sync_words[0] == 0)
     { /* accept-any: snap netid1 to the nearest multiple of 8 (the map
@@ -509,7 +481,6 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
         {
             s->net_id_off = 0; // the -8 is the wrong symbol, not a slip
             s->consume = (int32_t)s->samples_per_symbol;
-            *early_walk = 1;
             log_debug(
                 "netid early walk: dec %d,%d -> grid advanced one symbol\n",
                 s->netid_dec[0],
@@ -546,7 +517,7 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
     {
         log_debug(
             "netid reset: dec %d,%d expect %d,%d | cfo=%+.3f "
-            "sto_frac=%+.3f down_val=%d k_hat=%d start_off=%d add_up=%d\n",
+            "sto_frac=%+.3f down_val=%d k_hat=%d\n",
             s->netid_dec[0],
             s->netid_dec[1],
             (int)s->sync_words[0],
@@ -554,42 +525,19 @@ static int netid_verdict(struct frame_sync *s, int start_off, int *early_walk)
             (double)s->cfo,
             s->sto_frac,
             s->down_val,
-            s->k_hat,
-            start_off,
-            s->additional_upchirps);
+            s->k_hat);
 
         frame_sync_reset_detect(s);
         return 1;
-    }
-
-    // the sync word actually received, rebuilt from the decoded pair
-    // (nibble<<3 bins per symbol, grid slip removed, early walk shifted)
-    {
-        long n0 = util_mod(s->netid_dec[0] - s->net_id_off, n) / 8;
-        long n1 = util_mod(s->netid_dec[1] - s->net_id_off, n) / 8;
-        if (*early_walk) // the windows sat one symbol early
-        {
-            n0++;
-            n1++;
-        }
-        s->sync_word_rx = (uint8_t)(((n0 & 0xF) << 4) | (n1 & 0xF));
     }
 
     return 0;
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:545-841; [gr-lora] demod_impl.cc:279
-int frame_sync_sync_step(
-    struct frame_sync *s, const float complex *in, uint32_t *advance, struct frame_sync_status *st)
+int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
     *advance = 0;
-
-    if (s->phase != FS_SYNC)
-    {
-        if (st)
-            frame_sync_status(s, st);
-        return 1;
-    }
 
     frame_sync_downsample_prologue(s, in, s->in_down);
 
@@ -625,9 +573,6 @@ int frame_sync_sync_step(
                 &s->net_id_samp[0],
                 &in[0],
                 (size_t)(0.25 * s->samples_per_symbol) * sizeof(*s->net_id_samp));
-            // saturates at 3; sets the corrected preamble's length below
-            if (s->additional_upchirps < 3)
-                s->additional_upchirps++;
         }
         else
         {
@@ -691,13 +636,10 @@ int frame_sync_sync_step(
         if (fabsf(s->sto_frac) > 0.5f)
             s->sto_frac += s->sto_frac > 0 ? -1 : 1;
 
-        int start_off = decode_netid_pair(s, cfo_int);
+        decode_netid_pair(s, cfo_int);
 
-        int early_walk = 0;
-        if (netid_verdict(s, start_off, &early_walk))
+        if (netid_verdict(s))
         { // mismatch: the state is already back in DETECT
-            if (st)
-                frame_sync_status(s, st);
             return -1;
         }
 
@@ -715,7 +657,6 @@ int frame_sync_sync_step(
     }
 
     default:
-        log_error("sync: no sync sub-state, shouldn't happen\n");
         break;
     }
 
@@ -731,14 +672,12 @@ int frame_sync_sync_step(
         }
         *advance = (uint32_t)s->consume; // 1 once the verdict moved us out of SYNC
     }
-    if (st)
-        frame_sync_status(s, st);
     return done;
 }
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:845-871
-const float complex *frame_sync_output_step(
-    struct frame_sync *s, const float complex *in, uint32_t *advance, struct frame_sync_status *st)
+const float complex *
+frame_sync_output_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
     *advance = 0;
 
@@ -766,8 +705,6 @@ const float complex *frame_sync_output_step(
         s->symbol_cnt++;
 
         *advance = s->consume;
-        if (st)
-            frame_sync_status(s, st);
         return s->out_win;
     }
 

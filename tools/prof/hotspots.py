@@ -17,7 +17,7 @@ class Parser:
 
     def __init__(self):
         self.events = []
-        self.totals = [0] * 0
+        self.totals = []
         self.fn_self = {}  # (file, name) -> [cost]
         self.fn_ob = {}  # (file, name) -> object basename (the .so / binary)
         self.line_cost = {}  # (file, name, line) -> [cost]
@@ -156,6 +156,22 @@ def _human(n):
     return _fmt(n)
 
 
+def _print_sites(sites, tot, calls, match=None):
+    """Call-site table sorted by inclusive cost; `match` filters the target."""
+    rows = [
+        (site, tgt, ent)
+        for site, tgts in sites.items()
+        if os.path.exists(site[0])
+        for tgt, ent in tgts.items()
+        if match is None or match in tgt
+    ]
+    for (fl, fn, ln), tgt, ent in sorted(rows, key=lambda x: -x[2][1])[:calls]:
+        print(
+            f"{_human(ent[1]):>8} {100 * ent[1] / tot:5.2f}%  {ent[0]:>7}x  {fl}:{ln} {fn} -> {tgt}"
+        )
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Hot-spot attribution from a callgrind.out file.",
@@ -188,18 +204,7 @@ def main():
 
     if args.callers:
         print(f"\n== callers of *{args.callers}* (inclusive, by {args.sort}) ==")
-        rows = [
-            (site, tgt, ent)
-            for site, tgts in p.call_sites.items()
-            if os.path.exists(site[0])
-            for tgt, ent in tgts.items()
-            if args.callers in tgt
-        ]
-        for (fl, fn, ln), tgt, ent in sorted(rows, key=lambda x: -x[2][1])[: args.calls]:
-            print(
-                f"{_human(ent[1]):>8} {100 * ent[1] / tot:5.2f}%  {ent[0]:>7}x  "
-                f"{fl}:{ln} {fn} -> {tgt}"
-            )
+        rows = _print_sites(p.call_sites, tot, args.calls, match=args.callers)
         if not rows:
             print(f"  (no call site calls a function matching {args.callers!r})")
         return
@@ -231,16 +236,7 @@ def main():
             print(f"{_human(cost[ei]):>8} {100 * cost[ei] / tot:5.2f}%  {fn}:{ln}: {src[:80]}")
 
     print(f"\n== call sites (inclusive, by {args.sort}) ==")
-    flat = [
-        (site, tgt, ent)
-        for site, tgts in p.call_sites.items()
-        if os.path.exists(site[0])
-        for tgt, ent in tgts.items()
-    ]
-    for (fl, fn, ln), tgt, ent in sorted(flat, key=lambda x: -x[2][1])[: args.calls]:
-        print(
-            f"{_human(ent[1]):>8} {100 * ent[1] / tot:5.2f}%  {ent[0]:>7}x  {fl}:{ln} {fn} -> {tgt}"
-        )
+    _print_sites(p.call_sites, tot, args.calls)
 
 
 def _selftest():

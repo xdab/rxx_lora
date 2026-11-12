@@ -39,18 +39,18 @@ enum frame_sync_subphase
 
 /** Fine-pass reference spectra: down-ref slots (x 4N each); the up-ref row
  *  holding the sigma2 slot (the SFD start at shift 0). */
-#define SFD_FINE_DN 12
+#define SFD_FINE_DN 8
 #define SFD_FINE_UP 1
 
 /** Fine-pass decimated slots, offsets -9..2 windows (shared by both refs;
  *  row = slot + 9). */
-#define SFD_FINE_DEC 12
+#define SFD_FINE_DEC 8
 
 /** Coarse change-point pair-slot spectra, slots SFD_Q_MIN..SFD_Q_MAX+1 (4N each). */
 #define SFD_DPAIR 8
 
 /** Pairing representatives: (tau, f) and (tau +- N/2, f +- N/2) at most. */
-#define SFD_MAX_TAU_REPS 3
+#define SFD_MAX_TAU_REPS 2
 
 /** One fine-pass hypothesis: a scored slot shift. */
 struct sfd_cand
@@ -96,13 +96,6 @@ struct sfd_result
 {
     int64_t t_edge; // SFD symbol start, samples relative to the fire window
     float t_frac;   // t_edge's sub-sample remainder (the tau rounding residue)
-    int q;          // change-point SFD candidate, windows past the fire
-    float u;        // lock tone f + tau on the fire grid, bins
-    float d;        // change-point downchirp tone f - tau, bins
-    float tau;      // resolved timing offset, bins
-    float f;        // resolved CFO on the re-timed grid, bins
-    float lam;      // fine score in noise-power units
-    float margin;   // lam lead over the best other hypothesis
 };
 
 /**
@@ -137,7 +130,6 @@ struct frame_sync
                                  // whole-bin part arrives
     float sfo_hat;               // sampling-frequency offset estimate
     int netid_dec[2];            // net-id symbols after full correction
-    uint8_t sync_word_rx;        // 1-byte sync word rebuilt from the decoded pair
     int32_t consume;             // samples consumed by the last step; signed, may go negative (clamped at the SYNC handoff)
     uint32_t symb_numb;          // total output windows incl. 8 header
     int received_head;           // header decoded; unlocks the payload budget
@@ -151,8 +143,7 @@ struct frame_sync
     float sfo_cum;                    // SFO sample-drift accumulator
     int net_id_off;                   // netid1 - sync_words[0], in [-2, 2]
     int *preamb_up_vals;              // bins of the current stable run
-    int *mode_hash;                   // util_most_frequent scratch, number_of_bins ints
-    int additional_upchirps;          // extra preamble upchirps seen in SYNC
+    int *mode_hash;                   // mode scratch of the detect k_hat vote, number_of_bins ints
     float complex *upchirp;           // reference upchirp, N-point
     float complex *downchirp;         // reference downchirp, N-point
     float complex *in_down;           // decimated decision window
@@ -161,7 +152,6 @@ struct frame_sync
     float complex *net_id_samp;       // 2.5-symbol scratch around the sync word
     float complex *preamble_upchirps; // CFO-corrected preamble copy
     float complex *cfo_correc;        // N-point CFO correction vector
-    float complex *cfo_correc_aug;    // long correction vector (Bernier stage)
     float complex *cfo_correc_long;   // long correction vector (post-SFD stage)
     float complex *sfo_corr_vect;     // SFO correction vector
     float complex *net_ids_samp_dec;  // decimated net-id pair, 2N
@@ -237,11 +227,8 @@ void frame_sync_downsample_prologue(
 /**
  * @brief Bernier fractional-CFO estimator over the buffered preamble run.
  *
- * Shared with detect.c: the DETECT->SYNC look-ahead rotates its scanned
- * windows by the estimate before deciding the symbol grid. Side effects (the
- * fractional-CFO-corrected copy in s->preamble_upchirps and the long phasor
- * in s->cfo_correc_aug) are exactly what the SYNC walk's own first-step call
- * produces on the same data.
+ * Also fills s->preamble_upchirps with the fractional-CFO-corrected copy the
+ * SYNC walk consumes next.
  *
  * Reference: [gr-lora_sdr] frame_sync_impl.cc:194.
  */
@@ -253,32 +240,6 @@ int sfd_alloc(struct frame_sync *s);
 
 /** @brief Release everything sfd_alloc() allocated. */
 void sfd_free(struct frame_sync *s);
-
-/** @brief Pairing identity: (u, d) -> the N/2-deduplicated tau representatives
- *        in @p taus. @return the representative count */
-int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS]);
-
-/** @brief Median power of a power spectrum; @p scratch (len floats) is
- *        reordered in place. */
-float sfd_median_power(float *scratch, const float *mag, uint32_t len);
-
-/** @brief Fine score of one slot shift: known-bin evidence in noise-power
- *        units. The preamble and SFD groups are scored coherently over the
- *        slots at @p t_cand + shift; @p dn holds the down-ref spectra
- *        (SFD_FINE_DN rows of 4N, row = slot + 9) for the net-id terms;
- *        sync_words[0] != 0 adds the net-id terms. */
-float sfd_shift_lam(
-    struct frame_sync *s,
-    const float complex *in,
-    int64_t t_cand,
-    int shift,
-    float u_r,
-    float sigma2,
-    const uint16_t *sync_words);
-
-/** @brief Best candidate by lam; the margin over the best other through
- *        @p margin. @return the winner's index */
-int sfd_select(const struct sfd_cand *c, int n, float *margin);
 
 /**
  * @brief The SFD-first coarse sync: locate the SFD, resolve the timing/CFO

@@ -36,9 +36,9 @@
 #define SFD_SHIFT_MAX 3
 
 // slot offsets covered: change-point U slots q-6..q-3 for q in [2, 8] ->
-// -4..5, plus the guard's pair slots q, q+1 -> 2..9; fine-pass down slots
-// (shift + m for m in [-6, -1], shift in [-3, 3]) -> -9..2, up slots
-// (shift + {0, 1}) -> -3..4
+// -4..5, plus the guard's pair slots q, q+1 -> 2..9; the fine pass decimates
+// only what it reads: net-id slots (shift-2, shift-1) -> -5..2 and the
+// SFD-start sigma2 row (slot 0)
 #define SFD_U_SLOTS 14
 #define SFD_MAX_CANDIDATES (SFD_MAX_TAU_REPS * (SFD_SHIFT_MAX - SFD_SHIFT_MIN + 1))
 
@@ -99,13 +99,6 @@ static void
 sfd_slot_dec(const struct frame_sync *s, const float complex *in, int64_t off, float complex *dst)
 {
     const uint32_t n = s->number_of_bins;
-
-    if (s->oversampling_factor <= 1)
-    {
-        for (uint32_t j = 0; j < n; j++)
-            dst[j] = sfd_raw(s, in, off + (int64_t)j);
-        return;
-    }
 
     const unsigned half = s->sfd.fir_n / 2; // center of the filter in use
     const int64_t os = s->oversampling_factor;
@@ -197,12 +190,7 @@ static void sfd_slot_ref_fft(
 {
     const uint32_t n = s->number_of_bins, n4 = 4u * n;
 
-    for (uint32_t j = 0; j < n; j++)
-    {
-        float complex v = dec[j] * ref[j];
-        s->sfd.cx_in[j].r = crealf(v);
-        s->sfd.cx_in[j].i = cimagf(v);
-    }
+    dsp_dechirp_pack(s->sfd.cx_in, dec, ref, n);
     memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
     for (uint32_t i = 0; i < n4; i++)
@@ -213,9 +201,8 @@ static void sfd_slot_ref_fft(
  * concatenate (the tone is phase-continuous across symbols), zero-pad,
  * fractional peak. Returns u = f + tau, in symbol bins. */
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) // config-style, one call per pipeline run
-static float
-sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, float u_fallback)
-// NOLINTEND(bugprone-easily-swappable-parameters)
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (off, count) window pairs
+static float sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count)
 {
     const uint32_t n = s->number_of_bins;
     uint32_t m = 0;
@@ -223,16 +210,9 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
     for (int i = 0; i < count; i++)
     {
         sfd_slot_dec(s, in, off + (int64_t)i * (int64_t)s->samples_per_symbol, s->sfd.slot);
-        for (uint32_t j = 0; j < n; j++)
-        {
-            float complex v = s->sfd.slot[j] * s->downchirp[j];
-            s->sfd.cx_in[m].r = crealf(v);
-            s->sfd.cx_in[m].i = cimagf(v);
-            m++;
-        }
+        dsp_dechirp_pack(s->sfd.cx_in + m, s->sfd.slot, s->downchirp, n);
+        m += n;
     }
-    if (m == 0)
-        return u_fallback;
 
     memset(s->sfd.cx_in + m, 0, (size_t)(s->sfd.lock_len - m) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.lock_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
@@ -244,18 +224,6 @@ sfd_lock(struct frame_sync *s, const float complex *in, int64_t off, int count, 
     return util_wrap(
         dsp_frac_peak(s->sfd.lockmag, s->sfd.lock_len, NULL) * (float)n / (float)s->sfd.lock_len,
         n);
-}
-
-/* Modified Bessel I0, the kaiser window's denominator. */
-static float sfd_bessel_i0(float x)
-{
-    float sum = 1.0f, term = 1.0f;
-    for (int i = 1; i < 40; i++)
-    {
-        term *= (x / (2.0f * (float)i)) * (x / (2.0f * (float)i));
-        sum += term;
-    }
-    return sum;
 }
 
 int sfd_alloc(struct frame_sync *s)
@@ -299,39 +267,19 @@ int sfd_alloc(struct frame_sync *s)
     // Nyquist. Unity DC gain: h = c*sinc(c*(t - center)) windowed, normalized.
     // os == 2 instead gets a 15-tap half-band (h = 0.5*sinc((t-m)/2),
     // kaiser beta 5.7 ~ 60 dB): same cutoff, zeros at every other tap.
-    float c = 1.0f / (float)s->oversampling_factor;
-    float sum = 0.0f;
     memset(f->fir, 0, sizeof(f->fir));
     if (s->oversampling_factor == 2)
     {
-        const unsigned nt = 15, mid = nt / 2;
-        f->fir_n = nt;
-        const float beta = 5.7f, i0b = sfd_bessel_i0(beta);
-        for (unsigned t = 0; t < nt; t++)
-        {
-            float x = 0.5f * (float)((int)t - (int)mid);
-            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
-            float w = sfd_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
-            f->fir[t] = 0.5f * sinc * w;
-            sum += f->fir[t];
-        }
+        // 15-tap half-band: kaiser 5.7 at half-symbol spacing, zeros at
+        // every other tap
+        f->fir_n = 15;
+        dsp_sinc_fir(f->fir, f->fir_n, 0.5f, 5.7f);
     }
     else
     {
         f->fir_n = SFD_FIR_TAPS;
-        for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
-        {
-            float x = c * (float)((int)t - (int)(SFD_FIR_TAPS / 2));
-            float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
-            float w =
-                0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(SFD_FIR_TAPS - 1));
-            f->fir[t] = c * sinc * w;
-            sum += f->fir[t];
-        }
+        dsp_sinc_fir(f->fir, f->fir_n, 1.0f / (float)s->oversampling_factor, 0.0f);
     }
-    for (unsigned t = 0; t < SFD_FIR_TAPS; t++)
-        f->fir[t] /= sum;
 
     // fir_v: fir zero-padded to whole vectors; st: worst-case staging span
     // (one symbol of os-strided taps + the pad)
@@ -377,28 +325,20 @@ void sfd_free(struct frame_sync *s)
 /* Pairing identity: (u, d) resolve to (tau, f) with the N/2 ambiguity —
  * (tau, f) and (tau + N/2, f + N/2) give the same (u, d) — so the wrapped
  * representatives are at most two. */
-int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
+static int sfd_tau_reps(float u, float d, uint32_t n, float taus[SFD_MAX_TAU_REPS])
 {
+    /* tau0 is already wrapped to [-N/4, N/4); its N/2 partner wraps into the
+     * opposite half, so of the reference's three raw candidates exactly two
+     * distinct representatives survive every time — the ±N/2 pair dedups
+     * against itself. */
     float tau0 = util_wrap(u - d, n) / 2.0f;
-    const float raw_taus[SFD_MAX_TAU_REPS] = {tau0, tau0 - (float)n / 2.0f, tau0 + (float)n / 2.0f};
-    int ntau = 0;
-    for (int i = 0; i < SFD_MAX_TAU_REPS; i++)
-    {
-        float t = util_wrap(raw_taus[i], n);
-        int dup = 0;
-        for (int j = 0; j < ntau; j++)
-            // float wrap leaves the +-N/2 pair epsilon apart; an exact
-            // compare duplicates the whole candidate set
-            if (fabsf(taus[j] - t) < 0.5f)
-                dup = 1;
-        if (!dup)
-            taus[ntau++] = t;
-    }
-    return ntau;
+    taus[0] = util_wrap(tau0, n);
+    taus[1] = tau0 < 0.0f ? tau0 + (float)n / 2.0f : tau0 - (float)n / 2.0f;
+    return 2;
 }
 
 /* Median power of a power spectrum; scratch (len floats) is reordered. */
-float sfd_median_power(float *scratch, const float *mag, uint32_t len)
+static float sfd_median_power(float *scratch, const float *mag, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
         scratch[i] = mag[i];
@@ -427,12 +367,7 @@ static float sfd_coh_pow(
     for (int i = 0; i < count; i++)
     {
         sfd_slot_dec(s, in, off + (int64_t)i * (int64_t)s->samples_per_symbol, s->sfd.slot);
-        for (uint32_t j = 0; j < n; j++)
-        {
-            float complex v = s->sfd.slot[j] * ref[j];
-            s->sfd.coh_in[(size_t)i * n + j].r = crealf(v);
-            s->sfd.coh_in[(size_t)i * n + j].i = cimagf(v);
-        }
+        dsp_dechirp_pack(s->sfd.coh_in + (size_t)i * n, s->sfd.slot, ref, n);
     }
     memset(
         s->sfd.coh_in + (size_t)count * n,
@@ -461,9 +396,9 @@ static float sfd_coh_pow(
 /* The fine score of one slot shift: known-bin evidence in noise-power units.
  * The preamble and SFD groups are scored coherently (sfd_coh_pow); the net-id
  * terms are per-slot (different tones each). dn holds the down-ref spectra
- * (SFD_FINE_DN rows of 4N, row = slot + 9); sync_words[0] != 0 adds the
+ * (SFD_FINE_DN rows of 4N, row = slot + 5); sync_words[0] != 0 adds the
  * net-id terms. sigma2 is the representative's noise floor (per 4N-bin). */
-float sfd_shift_lam(
+static float sfd_shift_lam(
     struct frame_sync *s,
     const float complex *in,
     int64_t t_cand,
@@ -484,18 +419,12 @@ float sfd_shift_lam(
                     (2.0f * sigma2) -
                 1.0f;
     float net = 0.0f;
-    if (sync_words[0] != 0)
+    for (int k = 0; sync_words[0] != 0 && k < 2; k++)
     { // the pair at f + w0 / f + w1: positive net-id evidence, both into net
         net += sfd_bin_pow(
-                   s->sfd.fine_dn + (size_t)(shift - 2 + 9) * 4 * n,
+                   s->sfd.fine_dn + (size_t)(shift - 2 + k + 5) * 4 * n,
                    n,
-                   util_modf(u_r + (float)sync_words[0], n)) /
-                   sigma2 -
-               1.0f;
-        net += sfd_bin_pow(
-                   s->sfd.fine_dn + (size_t)(shift - 1 + 9) * 4 * n,
-                   n,
-                   util_modf(u_r + (float)sync_words[1], n)) /
+                   util_modf(u_r + (float)sync_words[k], n)) /
                    sigma2 -
                1.0f;
     }
@@ -504,7 +433,7 @@ float sfd_shift_lam(
 
 /* Best candidate by lam; the margin over the best other through *margin.
  * Returns the winner's index. */
-int sfd_select(const struct sfd_cand *c, int n, float *margin)
+static int sfd_select(const struct sfd_cand *c, int n, float *margin)
 {
     int best = 0;
     float lam_best = -HUGE_VALF;
@@ -540,7 +469,7 @@ static int sfd_coarse(
 
     /* Lock on the certified run: the n_up_req agreeing windows ending at the
      * fire are upchirps by construction. */
-    *u_hat = sfd_lock(s, in, -(int64_t)(s->n_up_req - 1) * sps, s->n_up_req, 0.0f);
+    *u_hat = sfd_lock(s, in, -(int64_t)(s->n_up_req - 1) * sps, s->n_up_req);
 
     /* Change point over candidate SFD starts q windows past the fire:
      * known-bin power at u, plus the candidate's two windows dechirped by
@@ -619,20 +548,21 @@ static int sfd_fine(
             continue;
 
         int64_t t_cand = (int64_t)q_hat * sps - (int64_t)lroundf(taus[it] * (float)os);
-        float u_r = sfd_lock(s, in, t_cand - 8 * sps, 6, u_hat);
+        float u_r = sfd_lock(s, in, t_cand - 8 * sps, 6);
 
-        // decimate each unique slot once (offsets -9..2); the down-ref FFTs
-        // (net-id terms, rows = slot + 9) and the up-ref sigma2 FFT (the SFD
-        // start at shift 0) share the decimation
-        for (int j = -9; j <= 2; j++)
-            sfd_slot_dec(s, in, t_cand + (int64_t)j * sps, s->sfd.fine_dec + (size_t)(j + 9) * n);
-        for (int j = -9; j <= 2; j++)
+        // decimate each slot the fine pass reads (offsets -5..2: shifts
+        // +-3 need slots shift-2..shift+1; the SFD-start sigma2 row is slot
+        // 0); the down-ref FFTs (net-id terms, rows = slot + 5) and the
+        // up-ref sigma2 FFT share the decimation
+        for (int j = -5; j <= 2; j++)
+            sfd_slot_dec(s, in, t_cand + (int64_t)j * sps, s->sfd.fine_dec + (size_t)(j + 5) * n);
+        for (int j = -5; j <= 2; j++)
             sfd_slot_ref_fft(
                 s,
-                s->sfd.fine_dec + (size_t)(j + 9) * n,
+                s->sfd.fine_dec + (size_t)(j + 5) * n,
                 s->downchirp,
-                s->sfd.fine_dn + (size_t)(j + 9) * n4);
-        sfd_slot_ref_fft(s, s->sfd.fine_dec + (size_t)9 * n, s->upchirp, s->sfd.fine_up);
+                s->sfd.fine_dn + (size_t)(j + 5) * n4);
+        sfd_slot_ref_fft(s, s->sfd.fine_dec + (size_t)5 * n, s->upchirp, s->sfd.fine_up);
 
         // one noise floor per representative, shared by every shift — lam
         // must stay comparable across hypotheses. Zero means the slot sits
@@ -661,8 +591,6 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
 
     memset(r, 0, sizeof(*r));
     r->t_edge = -1;
-    r->lam = -HUGE_VALF;
-    r->margin = -HUGE_VALF;
 
     float u_hat, d_hat;
     int q_hat;
@@ -683,11 +611,6 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
     r->t_edge = cands[best].base;
     // tau's rounding residue, for full-precision window placement
     r->t_frac = (float)(int)lroundf(cands[best].tau * (float)os) - cands[best].tau * (float)os;
-    r->q = q_hat;
-    r->u = u_hat;
-    r->d = d_hat;
-    r->tau = cands[best].tau;
-    r->f = cands[best].u; // on the re-timed grid tau ~= 0: u is f
 
     if (s->sync_words[0] != 0 && cands[best].lam < SFD_LAM_GATE)
     {
@@ -697,8 +620,8 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
             margin,
             u_hat,
             d_hat,
-            r->tau,
-            r->f);
+            cands[best].tau,
+            cands[best].u);
         return 0;
     }
 
@@ -706,14 +629,12 @@ int sfd_locate(struct frame_sync *s, const float complex *in, struct sfd_result 
         "sfd: q=%d edge=%lld tau=%.2f u=%.2f d=%.2f f=%.2f lam=%.1f margin=%.1f\n",
         q_hat,
         (long long)r->t_edge,
-        r->tau,
+        cands[best].tau,
         u_hat,
         d_hat,
-        r->f,
+        cands[best].u, // on the re-timed grid tau ~= 0: u is f
         cands[best].lam,
         margin);
 
-    r->lam = cands[best].lam;
-    r->margin = margin;
     return 1;
 }

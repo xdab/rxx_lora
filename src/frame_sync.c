@@ -52,55 +52,57 @@ struct frame_sync *frame_sync_create(
     s->sto_frac = 0.0f;
 
     int ret = -1;
-    s->preamb_up_vals = malloc(s->n_up_req * sizeof(*s->preamb_up_vals));
-    s->mode_hash = malloc(s->number_of_bins * sizeof(*s->mode_hash));
-    s->upchirp = malloc(s->number_of_bins * sizeof(*s->upchirp));
-    s->downchirp = malloc(s->number_of_bins * sizeof(*s->downchirp));
-    s->in_down = malloc(s->number_of_bins * sizeof(*s->in_down));
-    s->out_win = malloc(s->number_of_bins * sizeof(*s->out_win));
-    s->preamble_raw = malloc((size_t)preamble_len * s->number_of_bins * sizeof(*s->preamble_raw));
-    s->net_id_samp = malloc((size_t)(2.5 * s->samples_per_symbol) * sizeof(*s->net_id_samp));
-    s->cfo_correc_long =
-        malloc((size_t)(s->n_up_req + 3) * s->number_of_bins * sizeof(*s->cfo_correc_long));
-    s->sfo_corr_vect =
-        malloc((size_t)(s->n_up_req + 3) * s->number_of_bins * sizeof(*s->sfo_corr_vect));
-    s->net_ids_samp_dec = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->net_ids_samp_dec));
-    s->rot_tmp = malloc(s->samples_per_symbol * sizeof(*s->rot_tmp));
-    s->preamble_upchirps =
-        malloc((size_t)preamble_len * s->number_of_bins * sizeof(*s->preamble_upchirps));
-    s->cfo_correc = malloc(s->number_of_bins * sizeof(*s->cfo_correc));
-    s->cfo_correc_aug =
-        malloc((size_t)s->n_up_req * s->number_of_bins * sizeof(*s->cfo_correc_aug));
-    s->symb_corr = malloc(s->number_of_bins * sizeof(*s->symb_corr));
-    s->est_dechirped = malloc(s->number_of_bins * sizeof(*s->est_dechirped));
-    s->est_cx_in = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_cx_in));
-    s->est_cx_out = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_cx_out));
-    s->est_fft_mag = malloc(2 * (size_t)s->number_of_bins * sizeof(*s->est_fft_mag));
-    s->est_fft_val = malloc((size_t)s->n_up_req * s->number_of_bins * sizeof(*s->est_fft_val));
-    s->est_k0 = malloc(s->n_up_req * sizeof(*s->est_k0));
-    s->est_k0_mag = malloc(s->n_up_req * sizeof(*s->est_k0_mag));
-    s->cx_in = malloc(s->number_of_bins * sizeof(*s->cx_in));
-    s->cx_out = malloc(s->number_of_bins * sizeof(*s->cx_out));
-    s->fft_mag = malloc(s->number_of_bins * sizeof(*s->fft_mag));
+// Allocate a working buffer; a failure jumps straight to the cleanup, which
+// frees every slot (all pointers start NULL from the calloc above).
+#define FS_ALLOC(field, count)                                                                     \
+    do                                                                                             \
+    {                                                                                              \
+        s->field = malloc((size_t)(count) * sizeof(*s->field));                                    \
+        if (!s->field)                                                                             \
+        {                                                                                          \
+            log_error("frame_sync_create: out of memory\n");                                       \
+            goto out;                                                                              \
+        }                                                                                          \
+    } while (0)
+
+    FS_ALLOC(preamb_up_vals, s->n_up_req);
+    FS_ALLOC(mode_hash, s->number_of_bins);
+    FS_ALLOC(upchirp, s->number_of_bins);
+    FS_ALLOC(downchirp, s->number_of_bins);
+    FS_ALLOC(in_down, s->number_of_bins);
+    FS_ALLOC(out_win, s->number_of_bins);
+    FS_ALLOC(preamble_raw, preamble_len * s->number_of_bins);
+    FS_ALLOC(net_id_samp, 2.5 * s->samples_per_symbol);
+    FS_ALLOC(cfo_correc_long, (s->n_up_req + 3) * s->number_of_bins);
+    FS_ALLOC(sfo_corr_vect, (s->n_up_req + 3) * s->number_of_bins);
+    FS_ALLOC(net_ids_samp_dec, 2 * s->number_of_bins);
+    FS_ALLOC(rot_tmp, s->samples_per_symbol);
+    FS_ALLOC(preamble_upchirps, preamble_len * s->number_of_bins);
+    FS_ALLOC(cfo_correc, s->number_of_bins);
+    FS_ALLOC(symb_corr, s->number_of_bins);
+    FS_ALLOC(est_dechirped, s->number_of_bins);
+    FS_ALLOC(est_cx_in, 2 * s->number_of_bins);
+    FS_ALLOC(est_cx_out, 2 * s->number_of_bins);
+    FS_ALLOC(est_fft_mag, 2 * s->number_of_bins);
+    FS_ALLOC(est_fft_val, s->n_up_req * s->number_of_bins);
+    FS_ALLOC(est_k0, s->n_up_req);
+    FS_ALLOC(est_k0_mag, s->n_up_req);
+    FS_ALLOC(cx_in, s->number_of_bins);
+    FS_ALLOC(cx_out, s->number_of_bins);
+    FS_ALLOC(fft_mag, s->number_of_bins);
     if (s->detect_avg > 1)
     {
-        s->detect_mag_hist =
-            malloc((size_t)s->detect_avg * s->number_of_bins * sizeof(*s->detect_mag_hist));
+        FS_ALLOC(detect_mag_hist, s->detect_avg * s->number_of_bins);
         s->detect_mag_sum = calloc(s->number_of_bins, sizeof(*s->detect_mag_sum));
+        if (!s->detect_mag_sum)
+        {
+            log_error("frame_sync_create: out of memory\n");
+            goto out;
+        }
     }
-    if (!s->preamb_up_vals || !s->mode_hash || !s->upchirp || !s->downchirp || !s->in_down ||
-        !s->out_win || !s->preamble_raw || !s->net_id_samp || !s->cfo_correc_long ||
-        !s->sfo_corr_vect || !s->net_ids_samp_dec || !s->rot_tmp || !s->preamble_upchirps ||
-        !s->cfo_correc || !s->cfo_correc_aug || !s->symb_corr || !s->est_dechirped ||
-        !s->est_cx_in || !s->est_cx_out || !s->est_fft_mag || !s->est_fft_val || !s->est_k0 ||
-        !s->est_k0_mag || !s->cx_in || !s->cx_out || !s->fft_mag ||
-        (s->detect_avg > 1 && (!s->detect_mag_hist || !s->detect_mag_sum)))
-    {
-        log_error("frame_sync_create: out of memory\n");
-        goto out;
-    }
+#undef FS_ALLOC
     memset(s->preamb_up_vals, 0, s->n_up_req * sizeof(*s->preamb_up_vals));
-    util_build_ref_chirps(s->upchirp, s->downchirp, spreading_factor, 1);
+    util_build_ref_chirps(s->upchirp, s->downchirp, spreading_factor);
 
     s->fft_cfg = dsp_fft_alloc((int)s->number_of_bins);
     if (!s->fft_cfg)
@@ -147,7 +149,6 @@ static void frame_sync_cleanup(struct frame_sync *s)
     free(s->rot_tmp);
     free(s->preamble_upchirps);
     free(s->cfo_correc);
-    free(s->cfo_correc_aug);
     free(s->symb_corr);
     free(s->est_dechirped);
     free(s->est_cx_in);
@@ -209,40 +210,8 @@ void frame_sync_set_symbol_budget(struct frame_sync *s, uint32_t symb_numb)
     s->received_head = 1;
 }
 
-/* Gather kernel half-length: 2*FRAC_M taps. The default matches the house
- * resampler's m=4 (60 dB); experimental builds can sweep it. */
-static unsigned frac_gather_m(void)
-{
-#if RXX_EXPERIMENTAL // env-var knob: gather kernel half-length
-    static unsigned cached = 0;
-    if (!cached)
-    {
-        const char *e = getenv("FRAC_M");
-        cached = e ? (unsigned)strtol(e, NULL, 10) : 4;
-        if (cached < 1 || cached > 8)
-            cached = 4;
-    }
-    return cached;
-#else
-    return 4;
-#endif
-}
-
-static float bessel_i0(float x)
-{
-    /* Power series; converges long before the Kaiser betas in use run out
-     * of float range. */
-    float sum = 1.0f, term = 1.0f;
-    for (int k = 1; k < 24; k++)
-    {
-        float half = x / (2.0f * (float)k);
-        term *= half * half;
-        sum += term;
-        if (term < 1e-9f * sum)
-            break;
-    }
-    return sum;
-}
+/* Gather kernel half-length: 2*FRAC_M taps, the house resampler's m=4 (60 dB). */
+#define FRAC_M 4
 
 // a gather is directional (dst <- in); the geometry quadruple is inherent
 void frame_sync_frac_gather(
@@ -253,7 +222,7 @@ void frame_sync_frac_gather(
     uint32_t count,
     uint32_t len)
 {
-    unsigned m = frac_gather_m();
+    unsigned m = FRAC_M;
     int i0 = (int)floorf(base);
     float f = base - (float)i0;
 
@@ -272,14 +241,14 @@ void frame_sync_frac_gather(
      * output (stride is an integer), only the integer part advances. */
     float w[16];
     float beta = 5.6536f; // 60 dB stopband, the house resampler's as=60
-    float ib = bessel_i0(beta);
+    float ib = dsp_bessel_i0(beta);
     float wsum = 0.0f;
     for (unsigned j = 0; j < 2 * m; j++)
     {
         float d = (float)((int)j - (int)m + 1) - f; // tap - base
         float sinc = fabsf(d) < 1e-7f ? 1.0f : sinf((float)M_PI * d) / ((float)M_PI * d);
         float x = 2.0f * (float)j / (float)(2 * m - 1) - 1.0f;
-        w[j] = sinc * bessel_i0(beta * sqrtf(1.0f - x * x)) / ib;
+        w[j] = sinc * dsp_bessel_i0(beta * sqrtf(1.0f - x * x)) / ib;
         wsum += w[j];
     }
     for (unsigned j = 0; j < 2 * m; j++)
@@ -302,21 +271,16 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
 {
     *st = (struct frame_sync_status){
         .sf = s->spreading_factor,
-        .os = s->oversampling_factor,
         .samples_per_symbol = s->samples_per_symbol,
         .number_of_bins = s->number_of_bins,
         .bandwidth = s->bandwidth,
         .k_hat = s->k_hat,
         .n_up_req = s->n_up_req,
-        .down_val = s->down_val,
         .cfo = s->cfo,
         .sfo_hat = s->sfo_hat,
         .sto_frac = s->sto_frac,
         .netid_dec = {s->netid_dec[0], s->netid_dec[1]},
         .sync_words = {s->sync_words[0], s->sync_words[1]},
-        .sync_word_rx = s->sync_word_rx,
-        .symbol_cnt = s->symbol_cnt,
-        .bin_idx = s->bin_idx,
     };
 }
 

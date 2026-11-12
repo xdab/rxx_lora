@@ -16,35 +16,18 @@ struct output_record
     const uint8_t *packet; // de-whitened on-air payload (res->bytes)
     uint32_t len;          // payload length in bytes (header pay_len)
     float snr_db;          // header symbols' mean on-channel SNR, in dB
-    uint8_t cr;            // coding rate 4/(4+cr), 1..4
     int crc_present;       // header CRC flag
     int crc_valid;         // 1 valid, 0 invalid, -1 absent (crc_present == 0)
-    int net0;              // decoded net-id symbol 1, in FFT bins
-    int net1;              // decoded net-id symbol 2, in FFT bins
-    uint8_t sync_word;     // sync word rebuilt from the received net-id pair
     double cfo_hz;         // carrier-frequency offset, in Hz
-    double sfo;            // sampling-frequency offset estimate
-    double sto_frac;       // fractional sampling-time offset, in bins
-    size_t input_sample;   // frame start, in device/file input samples
-    double time_seconds;   // frame start, in seconds from stream start
 };
 
 /**
- * @brief Render one record as a single JSON line on stdout.
+ * @brief Render one record as a single JSON line on stdout. @p b64 is the
+ *        record's already base64-encoded packet (b64_encode).
  *
- * A fixed printf template, not a serializer; packet is base64 and every
- * other field is a JSON number, boolean or null.
+ * A fixed printf template, not a serializer; every other field is a JSON
+ * number, boolean or null.
  */
-void output_frame(const struct output_record *rec);
-
-/**
- * @brief Encode a byte buffer as base64 into out, null-terminated.
- *
- * The output should be at least 4*(in_len+2)/3 + 1 bytes in size (including
- * the terminator).
- *
- * @return 0 on success, -1 when out is NULL or out_cap is too small
- */
-int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap);
+void output_frame(const struct output_record *rec, const char *b64);
 
 #endif // OUTPUT_H

@@ -15,11 +15,11 @@ OBJ_DIR := obj/prof
 TARGET_SUFFIX := .prof
 endif
 
-# make experimental: RXX_EXPERIMENTAL hooks compiled in (see AGENTS.md), obj/exp, *.exp
-ifeq ($(EXPERIMENTAL),1)
-CFLAGS += -DRXX_EXPERIMENTAL=1
-OBJ_DIR := obj/exp
-TARGET_SUFFIX := .exp
+# make cov: -O0 gcov build for branch/line coverage maps, obj/cov, *.cov
+ifeq ($(COVERAGE),1)
+CFLAGS += -O0 -g --coverage
+OBJ_DIR := obj/cov
+TARGET_SUFFIX := .cov
 endif
 
 # Entry points and device backends are per-binary; everything else is shared core
@@ -78,9 +78,9 @@ install: all
 profile:
 	$(MAKE) PROFILE=1 all
 
-.PHONY: experimental
-experimental:
-	$(MAKE) EXPERIMENTAL=1 all
+.PHONY: cov
+cov:
+	$(MAKE) COVERAGE=1 file
 
 # clangd reads compile_commands.json; regenerate after adding sources or
 # changing CFLAGS, then restart the language server
@@ -156,7 +156,7 @@ help:
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
 	@echo "  install     - Install all three binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
-	@echo "  experimental - Build *.exp binaries with the RXX_EXPERIMENTAL hooks compiled in"
+	@echo "  cov         - Build a *.cov binary with coverage instrumentation (gcov)"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
 	@echo "  clean       - Remove build artifacts (obj/, bin/)"
 	@echo "  doc         - Generate API docs with doxygen"

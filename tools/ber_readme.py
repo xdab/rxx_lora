@@ -17,28 +17,26 @@ example:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
 import matplotlib
 
 matplotlib.use("Agg")
-import re
-
 import matplotlib.pyplot as plt
 import numpy as np
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
-import ber_combine
 from ber import theory_ber, theory_ber_coded
+from ber_combine import COLORS, fit_xlim, parse
 
 CR = re.compile(r"coded 4/(\d)")
 
 # per-SF default SNR windows [dB]: each curve's waterfall, roughly
 # center -12 dB (SF7) sliding 2.5-3 dB lower per SF step
 RANGE = {7: (-15, -6), 8: (-18, -9), 9: (-20, -11), 10: (-23, -15), 11: (-25, -18), 12: (-28, -21)}
-COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown"]
 
 
 def parse_trials(spec: str, sfs: list[int]) -> dict[int, int]:
@@ -71,8 +69,9 @@ def run_sweeps(args) -> list[dict]:
     import shlex
 
     logs = []
-    trials = parse_trials(args.trials, parse_sfs(args.sfs))
-    for sf in parse_sfs(args.sfs):
+    sfs = parse_sfs(args.sfs)
+    trials = parse_trials(args.trials, sfs)
+    for sf in sfs:
         lo, hi = RANGE[sf]
         if args.snr_min is not None:
             lo = args.snr_min
@@ -112,7 +111,7 @@ def run_sweeps(args) -> list[dict]:
         with open(log, "w") as fh:
             fh.write(cp.stdout)
         logs.append(log)
-    return [ber_combine.parse(log) for log in logs]
+    return [parse(log) for log in logs]
 
 
 def plot(sweeps: list[dict], out: str) -> None:
@@ -155,13 +154,8 @@ def plot(sweeps: list[dict], out: str) -> None:
     errs = np.concatenate([e for e in errs if len(e)])
     if len(errs):
         ax.set_ylim(errs.min() / 4, max(2.0, errs.max() * 2))
-    # x fits the measured points too: past the last observed error there is
-    # nothing to show but empty space (theory tails get cropped with it)
-    lo = min(s["snr"].min() for s in sweeps)
-    ends = [s["snr"][s["ber"] > 0] for s in sweeps]
-    hi = max(e[-1] if len(e) else s["snr"].max() for e, s in zip(ends, sweeps))
-    pad = 0.04 * (hi - lo)
-    ax.set_xlim(lo - pad, hi + pad)
+    # x fits the measured points too (theory tails get cropped with it)
+    fit_xlim(ax, sweeps)
     ax.set_xlabel("SNR [dB]")
     ax.set_ylabel("Payload BER [1]")
     ax.grid(True, which="both", alpha=0.3)
@@ -205,7 +199,7 @@ def main() -> None:
     args = p.parse_args()
 
     if args.logs:
-        sweeps = [ber_combine.parse(path) for path in args.logs]
+        sweeps = [parse(path) for path in args.logs]
     else:
         import tempfile
 

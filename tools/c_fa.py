@@ -50,7 +50,6 @@ def noise_capture(path, n, sigma, seed, pad_only=False):
         carrier = np.ones(n, dtype=np.complex64)
         y = add_awgn(carrier, -10 * np.log10(2 * sigma**2), np.random.default_rng(seed))
         y = (y - carrier).astype(np.complex64)  # drop the carrier: DC is a tone
-    y = y.astype(np.complex64)
     assert y.dtype == np.complex64 and y.nbytes == 8 * n, "capture must be 8 bytes/sample"
     p_meas = float(np.mean(np.abs(y) ** 2))
     assert pad_only or abs(p_meas - 2 * sigma**2) < 0.2 * sigma**2, (
@@ -60,7 +59,6 @@ def noise_capture(path, n, sigma, seed, pad_only=False):
         f"capture mean {y.mean():.4f} is not zero — a DC term is a tone the detector locks onto"
     )
     y.tofile(path)
-    return n
 
 
 def run_once(bin_path, sf, avg, iq, extra=()):

@@ -109,6 +109,60 @@ static float sinc_pi(float x)
     return (float)(sinf(M_PI * x) / (M_PI * x));
 }
 
+void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n)
+{
+    for (uint32_t j = 0; j < n; j++)
+    {
+        float complex v = x[j] * ref[j];
+        dst[j].r = crealf(v);
+        dst[j].i = cimagf(v);
+    }
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (nt, step, beta) is the design tuple, cold path
+void dsp_sinc_fir(float *h, unsigned nt, float step, float beta)
+{
+    const unsigned mid = nt / 2;
+    const float i0b = beta > 0.0f ? dsp_bessel_i0(beta) : 0.0f;
+    float sum = 0.0f;
+
+    for (unsigned t = 0; t < nt; t++)
+    {
+        float x = step * (float)((int)t - (int)mid);
+        float sinc = fabsf(x) < 1e-9f ? 1.0f : sinf((float)M_PI * x) / ((float)M_PI * x);
+        float w;
+        if (beta > 0.0f)
+        {
+            float r = ((float)(int)t - (float)(int)mid) / (float)(int)mid;
+            w = dsp_bessel_i0(beta * sqrtf(fmaxf(0.0f, 1.0f - r * r))) / i0b;
+        }
+        else
+        {
+            w = 0.54f - 0.46f * cosf(2.0f * (float)M_PI * (float)t / (float)(nt - 1));
+        }
+        h[t] = step * sinc * w;
+        sum += h[t];
+    }
+    for (unsigned t = 0; t < nt; t++)
+        h[t] /= sum;
+}
+
+/* Power-series I0, shared by the ad-hoc window designers (frame_sync, sfd);
+ * converges long before the Kaiser betas in use run out of float range. */
+float dsp_bessel_i0(float x)
+{
+    float sum = 1.0f, term = 1.0f;
+    for (int k = 1; k < 24; k++)
+    {
+        float half = x / (2.0f * (float)k);
+        term *= half * half;
+        sum += term;
+        if (term < 1e-9f * sum)
+            break;
+    }
+    return sum;
+}
+
 // Kaiser taper parameter for a target stop-band attenuation (Kaiser:1974)
 static float kaiser_beta(float as)
 {

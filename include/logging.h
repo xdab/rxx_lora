@@ -7,9 +7,6 @@
 #ifndef LOGGING_H
 #define LOGGING_H
 
-#include <stddef.h>
-#include <stdint.h>
-
 // Severity ladder; a message prints when its level >= the threshold.
 enum log_level
 {
