@@ -103,7 +103,7 @@ int main(int argc, char **argv)
             break;
         default:
             usage();
-            return 1;
+            return opt == 'h' ? 0 : 1;
         }
     }
 

@@ -34,9 +34,9 @@
 #define MAX_SF 12        // widest LLR row: one chip per bit position
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
 
-/* Rewind depth past a bad frame's fire, in whole symbol windows. The PR #9
- * sweep held flat through K=8 and stepped over a real frame at K=10; 4 sits
- * inside the flat region. */
+/* Rewind depth past a bad frame's fire, in whole symbol windows. Deeper skips
+ * re-decode less but can step over a real preamble hiding within SKIP windows
+ * of the fire. */
 #define REWIND_SKIP_SYMS 4
 #define MAX_BYTES 255 // the PHY length field is one byte
 

@@ -211,7 +211,4 @@ void source_advance(struct source *s, size_t pos)
     }
 }
 
-/* Wall-clock offset of an absolute working-grid position from the start of
- */
-
 int source_failed(const struct source *s) { return s->err; }

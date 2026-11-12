@@ -156,6 +156,7 @@ help:
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
 	@echo "  install     - Install all three binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
+	@echo "  cov         - Build a *.cov binary with coverage instrumentation (gcov)"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
 	@echo "  clean       - Remove build artifacts (obj/, bin/)"
 	@echo "  doc         - Generate API docs with doxygen"
