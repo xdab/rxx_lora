@@ -18,7 +18,7 @@ SDRPLAY_PROBE_FLAGS := -I$(SDRPLAY_HOME)/inc -L$(SDRPLAY_HOME)/x64
 # down. System DLLs and the non-redistributable sdrplay_api.dll drop out on
 # the existence check.
 GCC_ROOT := $(shell LC_ALL=C $(CC) -print-search-dirs 2>/dev/null | tr -d '\r' | sed -n '/^install: /{s|^install: ||;s|/lib/gcc/.*||;s|/bin/\.\.||;p}')
-UCRT64_BIN ?= $(GCC_ROOT)/bin # gcc's own bin dir: a PATH lookup races other installs
+UCRT64_BIN ?= $(GCC_ROOT)/bin
 DLL_IMPORTS := sed -n 's/[[:space:]]*DLL Name: //p'
 STAGE_DLLS = while read dll; do [ -f $(UCRT64_BIN)/$$dll ] && echo $(UCRT64_BIN)/$$dll; done | sort -u | xargs -r cp -t $(BIN_DIR)/
 
