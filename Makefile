@@ -11,10 +11,20 @@ SDRPLAY_INC ?= -I"C:/Program Files/SDRplay/API/inc"
 SDRPLAY_LIB ?= -L"C:/Program Files/SDRplay/API/x64"
 CFLAGS += $(SDRPLAY_INC)
 RSP_LIBS += $(SDRPLAY_LIB)
-# file_lora is the regression gate's binary: link its support libs static so
-# it runs without ucrt64/bin on PATH (rtl/rsp stay dynamic — their device
-# DLLs are runtime requirements anyway, and the SDRplay API is import-only)
-FILE_LIBS := -static
+# ship the runtime DLLs beside the binaries: DLL search starts in the
+# application directory, so a zipped bin/ runs on any Windows box without
+# the toolchain installed. fftw and the gcc runtime are LGPL (DLL alongside
+# satisfies it), librtlsdr is BSD; check SDRplay's terms before
+# redistributing sdrplay_api.dll — it comes from their API install.
+WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll
+SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
+
+.PHONY: dlls
+dlls: | $(BIN_DIR)
+	cp -p $(addprefix /c/msys64/ucrt64/bin/,$(WIN_DLLS)) $(SDRPLAY_DLL) $(BIN_DIR)/
+	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
+
+ALL_EXTRA := dlls
 endif
 
 SRC_DIR := src
@@ -58,8 +68,9 @@ SOURCES := $(wildcard $(SRC_DIR)/*.c)
 COMPDB := compile_commands.json
 
 # file needs no SDR library; rtl needs librtlsdr only; rsp the SDRplay API only
+# Windows additionally stages the runtime DLLs (see the dlls target below)
 .PHONY: all file rtl rsp
-all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp)
+all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp) $(ALL_EXTRA)
 	@if [ -z '$(BUILD_RTL)' ]; then \
 		echo "✗ rtl_lora not built: librtlsdr not found (install it, or force with RTL=1)"; fi
 	@if [ -z '$(BUILD_RSP)' ]; then \
@@ -76,7 +87,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 
 # Link: shared core + own entry point + own device + own library
 $(FILE_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_file.o $(OBJ_DIR)/device_file.o | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) $(FILE_LIBS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "✓ Build successful: $@"
 
 $(RTL_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_rtl.o $(OBJ_DIR)/device_rtl.o | $(BIN_DIR)
