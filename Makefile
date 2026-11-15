@@ -22,7 +22,9 @@ SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
 
 .PHONY: dlls
 dlls: | $(BIN_DIR)
-	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(SDRPLAY_DLL) $(BIN_DIR)/
+	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(BIN_DIR)/
+	@if [ -f $(SDRPLAY_DLL) ]; then cp -p $(SDRPLAY_DLL) $(BIN_DIR)/; \
+		else echo "  (sdrplay_api.dll not found - only rsp_lora needs it at runtime)"; fi
 	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
 
 ALL_EXTRA := dlls

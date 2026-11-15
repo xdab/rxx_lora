@@ -91,8 +91,9 @@ jobs:
 
   # Windows portability proof, sibling of distro-build: the UCRT64 toolchain
   # the Makefile's Windows_NT block targets. Regression is the workload, not a
-  # second verdict on the code — setup-msys2 leaves ucrt64/bin on PATH for the
-  # later steps, so the dynamically linked gate binary resolves its DLLs.
+  # second verdict on the code. The dlls target stages the runtime DLLs beside
+  # the binary, so the pwsh step runs the gate without ucrt64/bin on PATH —
+  # CI then exercises the exact zipped-bin/ distribution story.
   # fmt-check/tidy stay owned by the ubuntu jobs; capture cases (section 3)
   # are local-only there too.
   windows-build:
@@ -108,7 +109,7 @@ jobs:
 
       - name: Build bin/file_lora
         shell: msys2 {0}
-        run: make file
+        run: make file dlls UCRT64_BIN="$(dirname "$(command -v gcc)")"
 
       - name: Regression
         shell: pwsh
