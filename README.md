@@ -105,6 +105,13 @@ rsp_lora -w 0x2b -s9 -o8 --center-freq 869.525e6 --bw 125e3
 python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4
 ```
 
+**Windows:** build under [MSYS2](https://www.msys2.org)'s UCRT64 environment
+(`pacman -S make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-fftw mingw-w64-ucrt-x86_64-rtl-sdr`;
+the SDRplay API comes from the vendor's installer). `make all` additionally
+stages the runtime DLLs beside the binaries, so `bin/` runs standalone on any
+Windows box. Only `sdrplay_api.dll` is not shipped — its EULA grants no
+redistribution — so `rsp_lora` keeps needing the API install.
+
 ## Performance
 
 Sensitivity-wise, for the physical layer (PHY) parameters used by [Meshtastic](https://meshtastic.org/docs/introduction/)'s **MediumFast** preset, the receive chain comes within **~1 dB** of theoretical performance at SNRs above -16 dB.
