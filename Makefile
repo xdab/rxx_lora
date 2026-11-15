@@ -6,24 +6,24 @@ RSP_LIBS := -lsdrplay_api
 
 # Windows: the SDRplay API is a system install, not a pacman package
 ifeq ($(OS),Windows_NT)
-SDRPLAY_INC ?= -I"C:/Program Files/SDRplay/API/inc"
-SDRPLAY_LIB ?= -L"C:/Program Files/SDRplay/API/x64"
-CFLAGS += $(SDRPLAY_INC)
-RSP_LIBS += $(SDRPLAY_LIB)
+SDRPLAY_HOME ?= "C:/Program Files/SDRplay/API"
+CFLAGS += -I$(SDRPLAY_HOME)/inc
+RSP_LIBS += -L$(SDRPLAY_HOME)/x64
 # ship the runtime DLLs beside the binaries: DLL search starts in the
-# application directory, so a zipped bin/ runs on any Windows box without
-# the toolchain installed. fftw and the gcc runtime are LGPL, librtlsdr is
-# GPL-2.0-or-later — fine to ship as DLLs; sdrplay_api.dll is SDRplay's, check
-# their terms before redistributing.
+# application directory, so a zipped bin/ runs on any Windows box without the
+# toolchain installed. Their copyleft licenses (fftw/librtlsdr GPL-2+, gcc
+# runtime under its linking exception, libusb LGPL-2.1) all fit this GPL-3
+# repo; sdrplay_api.dll is proprietary — verify SDRplay's terms before shipping.
 WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll libusb-1.0.dll
-UCRT64_BIN ?= /c/msys64/ucrt64/bin
-SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
+SDRPLAY_DLL := $(SDRPLAY_HOME)/x64/sdrplay_api.dll
+# where the toolchain DLLs come from: gcc's bin dir, msys2's layout as fallback
+GCC_BIN := $(patsubst %/,%,$(dir $(shell command -v gcc 2>/dev/null)))
+UCRT64_BIN ?= $(if $(GCC_BIN),$(GCC_BIN),/c/msys64/ucrt64/bin)
 
 .PHONY: dlls
 dlls: | $(BIN_DIR)
 	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(BIN_DIR)/
-	@if [ -f $(SDRPLAY_DLL) ]; then cp -p $(SDRPLAY_DLL) $(BIN_DIR)/; \
-		else echo "  (sdrplay_api.dll not found - only rsp_lora needs it at runtime)"; fi
+	@if [ -f $(SDRPLAY_DLL) ]; then cp -p $(SDRPLAY_DLL) $(BIN_DIR)/; else echo "  (sdrplay_api.dll not found - only rsp_lora needs it at runtime)"; fi
 	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
 
 ALL_EXTRA := dlls
@@ -194,6 +194,7 @@ help:
 	@echo "  file        - Build bin/file_lora only (no SDR library needed)"
 	@echo "  rtl         - Build bin/rtl_lora only (needs librtlsdr, not the SDRplay API)"
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
+	@echo "  dlls        - Stage runtime DLLs in bin/ (Windows only)"
 	@echo "  install     - Install the built binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
 	@echo "  cov         - Build a *.cov binary with coverage instrumentation (gcov)"

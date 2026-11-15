@@ -106,7 +106,7 @@ jobs:
 
       - name: Build bin/file_lora
         shell: msys2 {0}
-        run: make file dlls UCRT64_BIN="$(dirname "$(command -v gcc)")"
+        run: make file dlls
 
       - name: Regression
         shell: pwsh
