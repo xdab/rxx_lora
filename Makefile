@@ -6,6 +6,9 @@ RSP_LIBS := -lsdrplay_api
 
 # Windows: the SDRplay API is a system install, not a pacman package
 ifeq ($(OS),Windows_NT)
+# pin make's own flavor of sh: PATH can offer a foreign MSYS flavor's (e.g.
+# Git Bash's), whose /ucrt64 mount points somewhere else entirely
+SHELL := /bin/sh
 SDRPLAY_HOME ?= "C:/Program Files/SDRplay/API"
 CFLAGS += -I$(SDRPLAY_HOME)/inc
 RSP_LIBS += -L$(SDRPLAY_HOME)/x64
@@ -13,18 +16,31 @@ RSP_LIBS += -L$(SDRPLAY_HOME)/x64
 SDRPLAY_PROBE_FLAGS := -I$(SDRPLAY_HOME)/inc -L$(SDRPLAY_HOME)/x64
 # ship the runtime DLLs beside the binaries: DLL search starts in the
 # application directory, so a zipped bin/ runs on any Windows box without the
-# toolchain installed. fftw/librtlsdr GPL-2+, winpthreads MIT/BSD, libusb
-# LGPL-2.1 — all compatible with this GPL-3 repo. sdrplay_api.dll is NOT
-# staged: its EULA grants no redistribution, so rsp_lora users install the
-# SDRplay API themselves (their installer provides DLL + service on PATH).
-WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll libusb-1.0.dll
-# where the toolchain DLLs come from: gcc's bin dir, msys2's layout as fallback
-GCC_BIN := $(patsubst %/,%,$(dir $(shell command -v gcc 2>/dev/null)))
-UCRT64_BIN ?= $(if $(GCC_BIN),$(GCC_BIN),/c/msys64/ucrt64/bin)
+# toolchain installed. The set is derived, not listed: read each built image's
+# import table with objdump and stage every imported name the toolchain bin
+# ships — fftw, librtlsdr, libusb (GPL-2+/LGPL-2.1, compatible with this GPL-3
+# repo) and the like. System DLLs drop out on the existence check, and the
+# proprietary sdrplay_api.dll can't sneak in: it lives in the vendor SDK dir,
+# not the toolchain — rsp_lora users install the SDRplay API themselves.
+# objdump, not ldd: the loader resolves through whatever happens to sit in
+# System32/PATH, the import table doesn't. Two passes close the chain one
+# level down (libusb rides on librtlsdr).
+# where the toolchain DLLs come from: the bin dir of the very $(CC) compiling,
+# asked from the compiler itself — -print-search-dirs' install line reads
+# <root>/bin/../lib/gcc/<triple>/<ver>; gcc is a native binary, so this is a
+# physical C:/ path no matter which MSYS flavor's sh runs the recipe. A PATH
+# lookup (command -v / where) would instead race whatever gcc other installs
+# put first, and a POSIX /ucrt64 path would only resolve under one flavor
+GCC_ROOT := $(shell LC_ALL=C $(CC) -print-search-dirs 2>/dev/null | tr -d '\r' | sed -n '/^install: /{s|^install: ||;s|/lib/gcc/.*||;s|/bin/\.\.||;p}')
+UCRT64_BIN ?= $(GCC_ROOT)/bin
+DLL_IMPORTS := sed -n 's/[[:space:]]*DLL Name: //p'
+STAGE_DLLS = while read dll; do [ -f $(UCRT64_BIN)/$$dll ] && echo $(UCRT64_BIN)/$$dll; done | sort -u | xargs -r cp -t $(BIN_DIR)/
 
 .PHONY: dlls
 dlls: | $(BIN_DIR)
-	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(BIN_DIR)/
+	@rm -f $(BIN_DIR)/*.dll
+	@for f in $(BIN_DIR)/*.exe; do [ -f $$f ] && objdump -p $$f; done | $(DLL_IMPORTS) | sort -u | $(STAGE_DLLS)
+	@for f in $(BIN_DIR)/*.dll; do [ -f $$f ] && objdump -p $$f; done | $(DLL_IMPORTS) | sort -u | $(STAGE_DLLS)
 	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
 
 ALL_EXTRA := dlls
