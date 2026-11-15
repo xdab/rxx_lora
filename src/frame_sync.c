@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 static void frame_sync_cleanup(struct frame_sync *s);
 
 // Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
@@ -90,6 +92,8 @@ struct frame_sync *frame_sync_create(
     FS_ALLOC(cx_in, s->number_of_bins);
     FS_ALLOC(cx_out, s->number_of_bins);
     FS_ALLOC(fft_mag, s->number_of_bins);
+    FS_ALLOC(detect_score, 2 * s->number_of_bins + 2);
+    FS_ALLOC(netid_mask, s->number_of_bins);
     if (s->detect_avg > 1)
     {
         FS_ALLOC(detect_mag_hist, s->detect_avg * s->number_of_bins);
@@ -160,6 +164,8 @@ static void frame_sync_cleanup(struct frame_sync *s)
     free(s->cx_in);
     free(s->cx_out);
     free(s->fft_mag);
+    free(s->detect_score);
+    free(s->netid_mask);
     free(s->detect_mag_hist);
     free(s->detect_mag_sum);
     sfd_free(s);
@@ -316,20 +322,14 @@ int frame_sync_get_symbol_val(
 
     // deviation: the reference multiplies into a separate dechirp buffer and
     // converts it to the FFT input in a second pass — same values, one pass
-    for (uint32_t i = 0; i < s->number_of_bins; i++)
-    {
-        float complex v = samples[i] * ref_chirp[i];
-        s->cx_in[i].r = crealf(v);
-        s->cx_in[i].i = cimagf(v);
-    }
+    volk_32fc_x2_multiply_32fc(
+        (lv_32fc_t *)(void *)s->cx_in, samples, ref_chirp, s->number_of_bins);
 
     dsp_fft(s->fft_cfg, s->cx_in, s->cx_out);
 
+    volk_32fc_magnitude_squared_32f(s->fft_mag, (lv_32fc_t *)(void *)s->cx_out, s->number_of_bins);
     for (uint32_t i = 0; i < s->number_of_bins; i++)
-    {
-        s->fft_mag[i] = s->cx_out[i].r * s->cx_out[i].r + s->cx_out[i].i * s->cx_out[i].i;
         sig_en += s->fft_mag[i];
-    }
 
     if (sig_en == 0)
         return -1;

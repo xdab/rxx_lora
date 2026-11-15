@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 // port-side: exact-refresh period (power of two) for the float phasor
 // recurrences below; bounds the running-multiply |z|=1 drift to ~3e-5.
 #define PHASOR_RESYNC 512
@@ -48,22 +50,14 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
     for (int i = 0; i < ust; i++)
     {
         // volk_32fc_x2_multiply_32fc, fused with the pack into the FFT input
-        for (uint32_t j = 0; j < n; j++)
-        {
-            float complex v = samples[(uint32_t)n * i + j] * s->downchirp[j];
-            s->est_cx_in[j].r = crealf(v);
-            s->est_cx_in[j].i = cimagf(v);
-        }
+        // (dsp_cpx is layout-identical to lv_32fc_t)
+        volk_32fc_x2_multiply_32fc(
+            (lv_32fc_t *)(void *)s->est_cx_in, samples + (size_t)n * i, s->downchirp, n);
 
         dsp_fft(s->fft_cfg, s->est_cx_in, s->est_cx_out);
 
-        for (uint32_t j = 0; j < n; j++)
-        {
-            s->est_fft_mag[j] =
-                s->est_cx_out[j].r * s->est_cx_out[j].r + s->est_cx_out[j].i * s->est_cx_out[j].i;
-            s->est_fft_val[j + (uint32_t)n * i] =
-                (float complex)s->est_cx_out[j].r + I * s->est_cx_out[j].i;
-        }
+        volk_32fc_magnitude_squared_32f(s->est_fft_mag, (lv_32fc_t *)(void *)s->est_cx_out, n);
+        memcpy(s->est_fft_val + (size_t)n * i, s->est_cx_out, n * sizeof(*s->est_fft_val));
 
         int max = 0;
         for (uint32_t j = 1; j < n; j++)
@@ -99,8 +93,7 @@ static float estimate_sto_frac(struct frame_sync *s)
     const uint32_t n = s->number_of_bins;
     const int ust = s->n_up_req - 1;
 
-    for (uint32_t j = 0; j < 2 * n; j++)
-        s->est_fft_mag[j] = 0;
+    memset(s->est_fft_mag, 0, (size_t)2 * n * sizeof(*s->est_fft_mag));
 
     for (int i = 0; i < ust; i++)
     {
@@ -109,9 +102,12 @@ static float estimate_sto_frac(struct frame_sync *s)
 
         dsp_fft(s->est_fft_cfg, s->est_cx_in, s->est_cx_out);
 
-        for (uint32_t j = 0; j < 2 * n; j++)
-            s->est_fft_mag[j] +=
-                s->est_cx_out[j].r * s->est_cx_out[j].r + s->est_cx_out[j].i * s->est_cx_out[j].i;
+        /* est_fft_val is only read inside the Bernier estimator (the four_cum
+         * is extracted before this runs), so it doubles as the magnitude
+         * scratch here. */
+        volk_32fc_magnitude_squared_32f(
+            (float *)s->est_fft_val, (lv_32fc_t *)(void *)s->est_cx_out, 2 * n);
+        volk_32f_x2_add_32f(s->est_fft_mag, s->est_fft_mag, (float *)s->est_fft_val, 2 * n);
     }
 
     int k0 = 0;
@@ -263,40 +259,33 @@ static int netid_top_tones(
     const uint32_t n = s->number_of_bins;
     int cnt = 0;
 
-    float sum = 0.0f;
-    for (uint32_t i = 0; i < n; i++)
-        sum += s->fft_mag[i];
+    float sum;
+    volk_32f_accumulator_s32f(&sum, s->fft_mag, n);
     *mean = sum / (float)n;
 
+    /* Strongest distinct tones, strongest first, no two within +-2 bins:
+     * work on a copy of the spectrum, take the first-max bin (the kernel's
+     * tie rule matches the scalar scan it replaces), then suppress its
+     * circular +-2 neighborhood at -1 — magnitudes are >= 0, so suppressed
+     * bins can never outrank an unselected one. */
+    float *mask = s->netid_mask;
+    memcpy(mask, s->fft_mag, n * sizeof(*mask));
     for (int c = 0; c < k; c++)
     {
-        int best = -1;
-        float m = -1.0f;
-        for (uint32_t i = 0; i < n; i++)
-        {
-            int dup = 0;
-            for (int j = 0; j < cnt; j++)
-            {
-                int d = abs((int)i - bins[j]);
-                if (d > (int)n / 2)
-                    d = (int)n - d;
-                if (d <= 2)
-                {
-                    dup = 1;
-                    break;
-                }
-            }
-            if (!dup && s->fft_mag[i] > m)
-            {
-                m = s->fft_mag[i];
-                best = (int)i;
-            }
-        }
-        if (best < 0)
-            break;
-        bins[cnt] = best;
+        uint32_t best;
+        volk_32f_index_max_32u(&best, mask, n);
+        bins[cnt] = (int)best;
         mags[cnt] = s->fft_mag[best];
         cnt++;
+        for (int d = -2; d <= 2; d++)
+        {
+            int i = (int)best + d;
+            if (i < 0)
+                i += (int)n;
+            else if (i >= (int)n)
+                i -= (int)n;
+            mask[i] = -1.0f;
+        }
     }
     return cnt;
 }

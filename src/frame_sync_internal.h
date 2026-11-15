@@ -130,9 +130,10 @@ struct frame_sync
                                  // whole-bin part arrives
     float sfo_hat;               // sampling-frequency offset estimate
     int netid_dec[2];            // net-id symbols after full correction
-    int32_t consume;             // samples consumed by the last step; signed, may go negative (clamped at the SYNC handoff)
-    uint32_t symb_numb;          // total output windows incl. 8 header
-    int received_head;           // header decoded; unlocks the payload budget
+    int32_t
+        consume; // samples consumed by the last step; signed, may go negative (clamped at the SYNC handoff)
+    uint32_t symb_numb; // total output windows incl. 8 header
+    int received_head;  // header decoded; unlocks the payload budget
 
     // internal (m_* members of frame_sync_impl.cc)
     int bin_idx;                      // previous window's winning bin
@@ -168,9 +169,12 @@ struct frame_sync
     int *est_k0;                  // per-window argmax
     double *est_k0_mag;           // per-window argmax magnitude
     // per-step scratch of get_symbol_val
-    dsp_cpx *cx_in;  // FFT input
-    dsp_cpx *cx_out; // FFT output
-    float *fft_mag;  // magnitude-squared spectrum
+    dsp_cpx *cx_in;      // FFT input
+    dsp_cpx *cx_out;     // FFT output
+    float *fft_mag;      // magnitude-squared spectrum
+    float *detect_score; // 3-bin score scratch: (n+2) staged bins + n scores
+    float *netid_mask;   // netid top-k scan: spectrum copy with selected
+                         // neighborhoods suppressed
     // DETECT averaging scratch (this port; unused when detect_avg <= 1)
     float *detect_mag_hist;   // ring of the last detect_avg spectra
     float *detect_mag_sum;    // sliding sum of the ring (resynced exactly); the

@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 #include "device.h"
 #include "dsp.h"
 #include "frame_sync.h" // SYNC_LOOKAHEAD
@@ -57,8 +59,7 @@ static int source_eof_pad(struct source *s, size_t need)
 static void apply_pre(struct source *s, float complex *x, size_t n)
 {
     if (s->conj)
-        for (size_t i = 0; i < n; i++)
-            x[i] = conjf(x[i]);
+        volk_32fc_conjugate_32fc((lv_32fc_t *)(void *)x, x, n);
 
     if (s->dc_block_on)
         dc_block_apply(&s->dc, x, n);

@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 // SFD start, windows past the fire; the fine shifts extend both ends
 #define SFD_Q_MIN 2
 #define SFD_Q_MAX 8
@@ -193,8 +195,7 @@ static void sfd_slot_ref_fft(
     dsp_dechirp_pack(s->sfd.cx_in, dec, ref, n);
     memset(s->sfd.cx_in + n, 0, (size_t)(n4 - n) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.slot_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
-    for (uint32_t i = 0; i < n4; i++)
-        mag[i] = s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
+    volk_32fc_magnitude_squared_32f(mag, (lv_32fc_t *)(void *)s->sfd.cx_out, n4);
 }
 
 /* Coherent lock over `count` consecutive slots from `off`: dechirp each,
@@ -216,9 +217,8 @@ static float sfd_lock(struct frame_sync *s, const float complex *in, int64_t off
 
     memset(s->sfd.cx_in + m, 0, (size_t)(s->sfd.lock_len - m) * sizeof(*s->sfd.cx_in));
     dsp_fft(s->sfd.lock_fft_cfg, s->sfd.cx_in, s->sfd.cx_out);
-    for (uint32_t i = 0; i < s->sfd.lock_len; i++)
-        s->sfd.lockmag[i] =
-            s->sfd.cx_out[i].r * s->sfd.cx_out[i].r + s->sfd.cx_out[i].i * s->sfd.cx_out[i].i;
+    volk_32fc_magnitude_squared_32f(
+        s->sfd.lockmag, (lv_32fc_t *)(void *)s->sfd.cx_out, s->sfd.lock_len);
 
     // tone at u bins -> FFT bin u * L / N; wrap handles the negative half
     return util_wrap(

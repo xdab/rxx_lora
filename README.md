@@ -154,6 +154,10 @@ While numerous patches and ideas have been applied on top of the originals, up t
 
 One way or the other, `liquid-dsp`'s code **is** used by this project. Credit is required and fully deserved, perhaps even more so when the dependency is no longer plainly visible as it would be with `-lliquid` present in the Makefile.
 
+### Vector kernels
+
+[VOLK](https://github.com/gnuradio/volk), the Vector-Optimized Library of Kernels, is vendored rather than linked: `src/volk.c` + `include/volk.h` carry the eight kernels the receiver uses (complex multiply, magnitude-squared, conjugate, real dot product, accumulator, add/subtract, indexed argmax) under their upstream `volk_*` names, with per-kernel source citations in the header. The AVX2 intrinsics were ported to GCC/clang-compatible vector extensions, so the code compiles without the library, its dispatcher or its headers. Vendored from gnuradio/volk @ v3.3.0-83-g453f289, licensed LGPL-3.0-or-later; all credit for the kernel implementations goes to the VOLK authors and contributors.
+
 ### Literature
 
 - J. Tapparel, O. Afisiadis, P. Mayoraz, A. Balatsoukas-Stimming, A. Burg, _An Open-Source LoRa Physical Layer Prototype on GNU Radio_ — [arXiv:2002.08208](https://arxiv.org/abs/2002.08208); the paper behind gr-lora_sdr.
