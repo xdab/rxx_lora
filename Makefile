@@ -4,6 +4,19 @@ LIBS := -lpthread -lm -lfftw3f
 RTL_LIBS := -lrtlsdr
 RSP_LIBS := -lsdrplay_api
 
+# Windows: the SDRplay API is a system install (not pacman); override by
+# passing SDRPLAY_INC / SDRPLAY_LIB when the SDK lives elsewhere
+ifeq ($(OS),Windows_NT)
+SDRPLAY_INC ?= -I"C:/Program Files/SDRplay/API/inc"
+SDRPLAY_LIB ?= -L"C:/Program Files/SDRplay/API/x64"
+CFLAGS += $(SDRPLAY_INC)
+RSP_LIBS += $(SDRPLAY_LIB)
+# file_lora is the regression gate's binary: link its support libs static so
+# it runs without ucrt64/bin on PATH (rtl/rsp stay dynamic — their device
+# DLLs are runtime requirements anyway, and the SDRplay API is import-only)
+FILE_LIBS := -static
+endif
+
 SRC_DIR := src
 OBJ_DIR := obj
 BIN_DIR := bin
@@ -63,7 +76,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 
 # Link: shared core + own entry point + own device + own library
 $(FILE_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_file.o $(OBJ_DIR)/device_file.o | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) $(FILE_LIBS)
 	@echo "✓ Build successful: $@"
 
 $(RTL_BIN): $(CORE_OBJ) $(OBJ_DIR)/main_rtl.o $(OBJ_DIR)/device_rtl.o | $(BIN_DIR)
@@ -97,12 +110,14 @@ cov:
 
 # clangd reads compile_commands.json; regenerate after adding sources or
 # changing CFLAGS, then restart the language server
+# native Windows clang tools need a Windows-form directory; msys CURDIR is not
+WIN_CURDIR := $(if $(filter Windows_NT,$(OS)),$(shell cygpath -m $(CURDIR)),$(CURDIR))
 .PHONY: compdb
 compdb:
 	@: > $(COMPDB); echo '[' >> $(COMPDB)
 	@for src in $(SOURCES); do \
 		q='\"'; \
-		{ printf '{"directory": "%s", "file": "%s", "arguments": ["%s"' "$(CURDIR)" "$$src" "$(CC)"; \
+		{ printf '{"directory": "%s", "file": "%s", "arguments": ["%s"' "$(WIN_CURDIR)" "$$src" "$(CC)"; \
 		  for fl in $(CFLAGS); do printf ', "%s"' "$$fl"; done; \
 		  printf ', "-c", "%s"]},\n' "$$src"; } >> $(COMPDB); \
 	done
