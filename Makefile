@@ -17,11 +17,12 @@ RSP_LIBS += $(SDRPLAY_LIB)
 # satisfies it), librtlsdr is BSD; check SDRplay's terms before
 # redistributing sdrplay_api.dll — it comes from their API install.
 WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll
+UCRT64_BIN ?= /c/msys64/ucrt64/bin
 SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
 
 .PHONY: dlls
 dlls: | $(BIN_DIR)
-	cp -p $(addprefix /c/msys64/ucrt64/bin/,$(WIN_DLLS)) $(SDRPLAY_DLL) $(BIN_DIR)/
+	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(SDRPLAY_DLL) $(BIN_DIR)/
 	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
 
 ALL_EXTRA := dlls

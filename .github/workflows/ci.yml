@@ -91,9 +91,10 @@ jobs:
 
   # Windows portability proof, sibling of distro-build: the UCRT64 toolchain
   # the Makefile's Windows_NT block targets. Regression is the workload, not a
-  # second verdict on the code — the static file_lora link exists for exactly
-  # this: run the gate without ucrt64/bin on PATH. fmt-check/tidy stay owned by
-  # the ubuntu jobs; capture cases (section 3) are local-only there too.
+  # second verdict on the code — setup-msys2 leaves ucrt64/bin on PATH for the
+  # later steps, so the dynamically linked gate binary resolves its DLLs.
+  # fmt-check/tidy stay owned by the ubuntu jobs; capture cases (section 3)
+  # are local-only there too.
   windows-build:
     runs-on: windows-latest
     steps:
