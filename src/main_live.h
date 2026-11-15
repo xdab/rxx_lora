@@ -12,7 +12,13 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h> // NOLINT(misc-include-cleaner): waitable timer
+#else
 #include <sys/time.h>
+#endif
 
 #include "device.h"
 #include "main.h"
@@ -35,12 +41,26 @@ enum
     OPT_REPORT_BAD,
 };
 
-static inline void live_on_signal(int sig)
+// runs off the main thread: SIGALRM on POSIX, thread-pool callback on Windows
+static void live_timeout_fired(void)
 {
-    if (sig == SIGALRM)
-        g_timeout = 1;
+    g_timeout = 1;
     if (g_dev)
         device_stop(g_dev);
+}
+
+static inline void live_on_signal(int sig)
+{
+#if defined(_WIN32)
+    (void)sig;
+    if (g_dev)
+        device_stop(g_dev);
+#else
+    if (sig == SIGALRM)
+        live_timeout_fired();
+    else if (g_dev)
+        device_stop(g_dev);
+#endif
 }
 
 // the option fields the shared blocks below handle
@@ -137,6 +157,52 @@ static inline void live_signal_setup(void)
     (void)signal(SIGTERM, live_on_signal);
 }
 
+#if defined(_WIN32)
+
+static HANDLE g_timer;
+static HANDLE g_timer_wait;
+
+static void CALLBACK live_timer_cb(void *ctx, BOOLEAN fired)
+{
+    (void)ctx;
+    (void)fired;
+    live_timeout_fired();
+}
+
+static inline void live_timer_arm(double timeout_s)
+{
+    if (timeout_s <= 0.0)
+        return;
+    g_timer = CreateWaitableTimerW(NULL, FALSE, NULL);
+    if (!g_timer)
+    {
+        log_warn("no waitable timer, -x budget ignored\n");
+        return;
+    }
+
+    LARGE_INTEGER due;
+    due.QuadPart = -(LONGLONG)(timeout_s * 1e7); // relative, 100 ns ticks
+    if (due.QuadPart == 0)
+        due.QuadPart = -1; // a sub-tick budget still fires
+    SetWaitableTimer(g_timer, &due, 0, NULL, NULL, FALSE);
+    RegisterWaitForSingleObject(
+        &g_timer_wait, g_timer, live_timer_cb, NULL, INFINITE, WT_EXECUTEDEFAULT);
+}
+
+static inline void live_timer_disarm(double timeout_s)
+{
+    if (g_timer)
+    {
+        UnregisterWaitEx(g_timer_wait, INVALID_HANDLE_VALUE); // blocking: no callback past teardown
+        CloseHandle(g_timer);
+        g_timer = NULL;
+    }
+    if (g_timeout)
+        log_info("duration reached (%.1f s), stopping\n", timeout_s);
+}
+
+#else
+
 // route the -x budget through the same clean stop as Ctrl-C (device_stop)
 static inline void live_timer_arm(double timeout_s)
 {
@@ -165,6 +231,8 @@ static inline void live_timer_disarm(double timeout_s)
     if (g_timeout)
         log_info("duration reached (%.1f s), stopping\n", timeout_s);
 }
+
+#endif // _WIN32
 
 static inline void live_record_note(const struct live_opts *o)
 {

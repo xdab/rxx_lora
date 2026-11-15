@@ -17,6 +17,7 @@ __pycache__/
 # IDE directories
 .vscode/
 .idea/
+.zcode/
 
 # Dependencies
 *.a

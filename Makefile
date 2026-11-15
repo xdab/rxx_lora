@@ -4,6 +4,34 @@ LIBS := -lpthread -lm -lfftw3f
 RTL_LIBS := -lrtlsdr
 RSP_LIBS := -lsdrplay_api
 
+# Windows: the SDRplay API is a system install, not a pacman package
+ifeq ($(OS),Windows_NT)
+# pin make's own sh: a foreign MSYS flavor in PATH (e.g. Git Bash) mounts /ucrt64 elsewhere
+SHELL := /bin/sh
+SDRPLAY_HOME ?= "C:/Program Files/SDRplay/API"
+CFLAGS += -I$(SDRPLAY_HOME)/inc
+RSP_LIBS += -L$(SDRPLAY_HOME)/x64
+# the probe compiles without CFLAGS, so feed it the SDK paths explicitly
+SDRPLAY_PROBE_FLAGS := -I$(SDRPLAY_HOME)/inc -L$(SDRPLAY_HOME)/x64
+# stage every import-table DLL that exists in the toolchain bin beside the
+# binaries (DLL search starts there); two passes close the chain one level
+# down. System DLLs and the non-redistributable sdrplay_api.dll drop out on
+# the existence check.
+GCC_ROOT := $(shell LC_ALL=C $(CC) -print-search-dirs 2>/dev/null | tr -d '\r' | sed -n '/^install: /{s|^install: ||;s|/lib/gcc/.*||;s|/bin/\.\.||;p}')
+UCRT64_BIN ?= $(GCC_ROOT)/bin
+DLL_IMPORTS := sed -n 's/[[:space:]]*DLL Name: //p'
+STAGE_DLLS = while read dll; do [ -f $(UCRT64_BIN)/$$dll ] && echo $(UCRT64_BIN)/$$dll; done | sort -u | xargs -r cp -t $(BIN_DIR)/
+
+.PHONY: dlls
+dlls: | $(BIN_DIR)
+	@rm -f $(BIN_DIR)/*.dll
+	@for f in $(BIN_DIR)/*.exe; do [ -f $$f ] && objdump -p $$f; done | $(DLL_IMPORTS) | sort -u | $(STAGE_DLLS)
+	@for f in $(BIN_DIR)/*.dll; do [ -f $$f ] && objdump -p $$f; done | $(DLL_IMPORTS) | sort -u | $(STAGE_DLLS)
+	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
+
+ALL_EXTRA := dlls
+endif
+
 SRC_DIR := src
 OBJ_DIR := obj
 BIN_DIR := bin
@@ -33,7 +61,7 @@ CORE_OBJ := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(CORE_SRC))
 # verdict: RTL=0/RSP=0 skip, RTL=1/RSP=1 build (and fail if really missing).
 PROBE := tools/probe_lib.sh
 HAVE_RTL := $(shell $(PROBE) rtl-sdr.h -lrtlsdr)
-HAVE_RSP := $(shell $(PROBE) sdrplay_api.h -lsdrplay_api)
+HAVE_RSP := $(shell $(PROBE) sdrplay_api.h $(SDRPLAY_PROBE_FLAGS) -lsdrplay_api)
 BUILD_RTL := $(if $(RTL),$(filter 1,$(RTL)),$(HAVE_RTL))
 BUILD_RSP := $(if $(RSP),$(filter 1,$(RSP)),$(HAVE_RSP))
 
@@ -46,7 +74,7 @@ COMPDB := compile_commands.json
 
 # file needs no SDR library; rtl needs librtlsdr only; rsp the SDRplay API only
 .PHONY: all file rtl rsp
-all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp)
+all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp) $(ALL_EXTRA)
 	@if [ -z '$(BUILD_RTL)' ]; then \
 		echo "✗ rtl_lora not built: librtlsdr not found (install it, or force with RTL=1)"; fi
 	@if [ -z '$(BUILD_RSP)' ]; then \
@@ -97,12 +125,14 @@ cov:
 
 # clangd reads compile_commands.json; regenerate after adding sources or
 # changing CFLAGS, then restart the language server
+# native Windows clang tools need a Windows-form directory (msys CURDIR is not)
+WIN_CURDIR := $(if $(filter Windows_NT,$(OS)),$(shell cygpath -m $(CURDIR)),$(CURDIR))
 .PHONY: compdb
 compdb:
 	@: > $(COMPDB); echo '[' >> $(COMPDB)
 	@for src in $(SOURCES); do \
 		q='\"'; \
-		{ printf '{"directory": "%s", "file": "%s", "arguments": ["%s"' "$(CURDIR)" "$$src" "$(CC)"; \
+		{ printf '{"directory": "%s", "file": "%s", "arguments": ["%s"' "$(WIN_CURDIR)" "$$src" "$(CC)"; \
 		  for fl in $(CFLAGS); do printf ', "%s"' "$$fl"; done; \
 		  printf ', "-c", "%s"]},\n' "$$src"; } >> $(COMPDB); \
 	done
@@ -167,6 +197,7 @@ help:
 	@echo "  file        - Build bin/file_lora only (no SDR library needed)"
 	@echo "  rtl         - Build bin/rtl_lora only (needs librtlsdr, not the SDRplay API)"
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
+	@echo "  dlls        - Stage runtime DLLs in bin/ (Windows only)"
 	@echo "  install     - Install the built binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
 	@echo "  cov         - Build a *.cov binary with coverage instrumentation (gcov)"
