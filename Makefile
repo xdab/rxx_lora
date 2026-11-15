@@ -14,9 +14,9 @@ RSP_LIBS += $(SDRPLAY_LIB)
 # ship the runtime DLLs beside the binaries: DLL search starts in the
 # application directory, so a zipped bin/ runs on any Windows box without
 # the toolchain installed. fftw and the gcc runtime are LGPL (DLL alongside
-# satisfies it), librtlsdr is BSD; check SDRplay's terms before
+# satisfies it), librtlsdr is GPL-2.0-or-later; check SDRplay's terms before
 # redistributing sdrplay_api.dll — it comes from their API install.
-WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll
+WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll libusb-1.0.dll
 UCRT64_BIN ?= /c/msys64/ucrt64/bin
 SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
 
