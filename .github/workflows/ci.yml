@@ -89,11 +89,12 @@ jobs:
       - name: Build
         run: make bin/file_lora bin/rtl_lora
 
-  # Windows portability proof: the UCRT64 toolchain the Makefile's Windows_NT
-  # block targets. Build + regression (the static file_lora link exists for
-  # exactly this: run the gate without ucrt64/bin on PATH). fmt-check/tidy stay
-  # owned by the ubuntu jobs; capture cases (section 3) are local-only there too.
-  windows-regression:
+  # Windows portability proof, sibling of distro-build: the UCRT64 toolchain
+  # the Makefile's Windows_NT block targets. Regression is the workload, not a
+  # second verdict on the code — the static file_lora link exists for exactly
+  # this: run the gate without ucrt64/bin on PATH. fmt-check/tidy stay owned by
+  # the ubuntu jobs; capture cases (section 3) are local-only there too.
+  windows-build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
