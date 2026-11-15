@@ -9,13 +9,15 @@ ifeq ($(OS),Windows_NT)
 SDRPLAY_HOME ?= "C:/Program Files/SDRplay/API"
 CFLAGS += -I$(SDRPLAY_HOME)/inc
 RSP_LIBS += -L$(SDRPLAY_HOME)/x64
+# the probe compiles without CFLAGS, so feed it the SDK paths explicitly
+SDRPLAY_PROBE_FLAGS := -I$(SDRPLAY_HOME)/inc -L$(SDRPLAY_HOME)/x64
 # ship the runtime DLLs beside the binaries: DLL search starts in the
 # application directory, so a zipped bin/ runs on any Windows box without the
-# toolchain installed. Their copyleft licenses (fftw/librtlsdr GPL-2+, gcc
-# runtime under its linking exception, libusb LGPL-2.1) all fit this GPL-3
-# repo; sdrplay_api.dll is proprietary — verify SDRplay's terms before shipping.
+# toolchain installed. fftw/librtlsdr GPL-2+, winpthreads MIT/BSD, libusb
+# LGPL-2.1 — all compatible with this GPL-3 repo. sdrplay_api.dll is NOT
+# staged: its EULA grants no redistribution, so rsp_lora users install the
+# SDRplay API themselves (their installer provides DLL + service on PATH).
 WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll libusb-1.0.dll
-SDRPLAY_DLL := $(SDRPLAY_HOME)/x64/sdrplay_api.dll
 # where the toolchain DLLs come from: gcc's bin dir, msys2's layout as fallback
 GCC_BIN := $(patsubst %/,%,$(dir $(shell command -v gcc 2>/dev/null)))
 UCRT64_BIN ?= $(if $(GCC_BIN),$(GCC_BIN),/c/msys64/ucrt64/bin)
@@ -23,7 +25,6 @@ UCRT64_BIN ?= $(if $(GCC_BIN),$(GCC_BIN),/c/msys64/ucrt64/bin)
 .PHONY: dlls
 dlls: | $(BIN_DIR)
 	cp -p $(addprefix $(UCRT64_BIN)/,$(WIN_DLLS)) $(BIN_DIR)/
-	@if [ -f $(SDRPLAY_DLL) ]; then cp -p $(SDRPLAY_DLL) $(BIN_DIR)/; else echo "  (sdrplay_api.dll not found - only rsp_lora needs it at runtime)"; fi
 	@echo "✓ runtime DLLs staged in $(BIN_DIR)/"
 
 ALL_EXTRA := dlls
@@ -58,7 +59,7 @@ CORE_OBJ := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(CORE_SRC))
 # verdict: RTL=0/RSP=0 skip, RTL=1/RSP=1 build (and fail if really missing).
 PROBE := tools/probe_lib.sh
 HAVE_RTL := $(shell $(PROBE) rtl-sdr.h -lrtlsdr)
-HAVE_RSP := $(shell $(PROBE) sdrplay_api.h -lsdrplay_api)
+HAVE_RSP := $(shell $(PROBE) sdrplay_api.h $(SDRPLAY_PROBE_FLAGS) -lsdrplay_api)
 BUILD_RTL := $(if $(RTL),$(filter 1,$(RTL)),$(HAVE_RTL))
 BUILD_RSP := $(if $(RSP),$(filter 1,$(RSP)),$(HAVE_RSP))
 
