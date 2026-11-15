@@ -72,8 +72,8 @@ static int get_symbol_val_detect(
 
     /* The 3-bin score is a cyclic 3-tap sliding sum: stage the spectrum with
      * both wrapped edges materialized, then two whole-vector adds give the
-     * score vector and the argmax kernel picks the bin (first-max, matching
-     * the scalar scan it replaces). */
+     * score vector and the argmax kernel picks the bin (first-max tie rule:
+     * later equal maxima must not win). */
     float *staged = s->detect_score; // n + 2 staged bins
     float *score = staged + n + 2;   // n scores
     staged[0] = mag[n - 1];

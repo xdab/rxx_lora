@@ -264,10 +264,10 @@ static int netid_top_tones(
     *mean = sum / (float)n;
 
     /* Strongest distinct tones, strongest first, no two within +-2 bins:
-     * work on a copy of the spectrum, take the first-max bin (the kernel's
-     * tie rule matches the scalar scan it replaces), then suppress its
-     * circular +-2 neighborhood at -1 — magnitudes are >= 0, so suppressed
-     * bins can never outrank an unselected one. */
+     * work on a copy of the spectrum, take the first-max bin (later equal
+     * maxima must not win), then suppress its circular +-2 neighborhood at
+     * -1 — magnitudes are >= 0, so suppressed bins can never outrank an
+     * unselected one. */
     float *mask = s->netid_mask;
     memcpy(mask, s->fft_mag, n * sizeof(*mask));
     for (int c = 0; c < k; c++)

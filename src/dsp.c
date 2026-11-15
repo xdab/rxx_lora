@@ -229,7 +229,8 @@ void dc_block_apply(struct dc_block *d, float complex *x, size_t n)
 
 float dsp_frac_peak(const float *sp, uint32_t len, float *pk)
 {
-    // first-max semantics, matching the scalar scan this kernel replaces
+    // first-max tie rule: the interpolated peak shifts if a later equal
+    // maximum won
     uint32_t k;
     volk_32f_index_max_32u(&k, sp, len);
 
