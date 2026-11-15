@@ -4,8 +4,7 @@ LIBS := -lpthread -lm -lfftw3f
 RTL_LIBS := -lrtlsdr
 RSP_LIBS := -lsdrplay_api
 
-# Windows: the SDRplay API is a system install (not pacman); override by
-# passing SDRPLAY_INC / SDRPLAY_LIB when the SDK lives elsewhere
+# Windows: the SDRplay API is a system install, not a pacman package
 ifeq ($(OS),Windows_NT)
 SDRPLAY_INC ?= -I"C:/Program Files/SDRplay/API/inc"
 SDRPLAY_LIB ?= -L"C:/Program Files/SDRplay/API/x64"
@@ -13,9 +12,9 @@ CFLAGS += $(SDRPLAY_INC)
 RSP_LIBS += $(SDRPLAY_LIB)
 # ship the runtime DLLs beside the binaries: DLL search starts in the
 # application directory, so a zipped bin/ runs on any Windows box without
-# the toolchain installed. fftw and the gcc runtime are LGPL (DLL alongside
-# satisfies it), librtlsdr is GPL-2.0-or-later; check SDRplay's terms before
-# redistributing sdrplay_api.dll — it comes from their API install.
+# the toolchain installed. fftw and the gcc runtime are LGPL, librtlsdr is
+# GPL-2.0-or-later — fine to ship as DLLs; sdrplay_api.dll is SDRplay's, check
+# their terms before redistributing.
 WIN_DLLS := libfftw3f-3.dll libwinpthread-1.dll librtlsdr.dll libusb-1.0.dll
 UCRT64_BIN ?= /c/msys64/ucrt64/bin
 SDRPLAY_DLL ?= "C:/Program Files/SDRplay/API/x64/sdrplay_api.dll"
@@ -71,7 +70,6 @@ SOURCES := $(wildcard $(SRC_DIR)/*.c)
 COMPDB := compile_commands.json
 
 # file needs no SDR library; rtl needs librtlsdr only; rsp the SDRplay API only
-# Windows additionally stages the runtime DLLs (see the dlls target below)
 .PHONY: all file rtl rsp
 all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp) $(ALL_EXTRA)
 	@if [ -z '$(BUILD_RTL)' ]; then \
@@ -124,7 +122,7 @@ cov:
 
 # clangd reads compile_commands.json; regenerate after adding sources or
 # changing CFLAGS, then restart the language server
-# native Windows clang tools need a Windows-form directory; msys CURDIR is not
+# native Windows clang tools need a Windows-form directory (msys CURDIR is not)
 WIN_CURDIR := $(if $(filter Windows_NT,$(OS)),$(shell cygpath -m $(CURDIR)),$(CURDIR))
 .PHONY: compdb
 compdb:

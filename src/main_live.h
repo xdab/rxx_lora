@@ -41,8 +41,7 @@ enum
     OPT_REPORT_BAD,
 };
 
-// the -x budget expired: delivered as SIGALRM on POSIX, from a thread-pool
-// callback on Windows — both run outside the main thread
+// runs off the main thread: SIGALRM on POSIX, thread-pool callback on Windows
 static void live_timeout_fired(void)
 {
     g_timeout = 1;
@@ -53,7 +52,7 @@ static void live_timeout_fired(void)
 static inline void live_on_signal(int sig)
 {
 #if defined(_WIN32)
-    (void)sig; // no SIGALRM there; Ctrl-C stops through device_stop only
+    (void)sig; // no SIGALRM on Windows
     if (g_dev)
         device_stop(g_dev);
 #else
@@ -160,8 +159,8 @@ static inline void live_signal_setup(void)
 
 #if defined(_WIN32)
 
-static HANDLE g_timer;      // waitable timer behind the -x budget
-static HANDLE g_timer_wait; // its thread-pool registration
+static HANDLE g_timer;
+static HANDLE g_timer_wait;
 
 static void CALLBACK live_timer_cb(void *ctx, BOOLEAN fired)
 {
@@ -170,7 +169,6 @@ static void CALLBACK live_timer_cb(void *ctx, BOOLEAN fired)
     live_timeout_fired();
 }
 
-// route the -x budget through the same clean stop as Ctrl-C (device_stop)
 static inline void live_timer_arm(double timeout_s)
 {
     if (timeout_s <= 0.0)
