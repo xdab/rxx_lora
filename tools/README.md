@@ -1,7 +1,8 @@
 # tools/ — algorithm scratchpad
 
-Standalone numpy/matplotlib scripts: one script, one thing, no install. Shared
-kernels (upchirp, downchirp, demod LO, AWGN) live once in `common.py`.
+Standalone numpy/matplotlib scripts, plus the Makefile's shell probe: one
+script, one thing, no install. Shared kernels (upchirp, downchirp, demod LO,
+AWGN) live once in `common.py`.
 
 Docstring standard: module docstring = one purpose line + references; everything
 else a reader needs (parameters, pipeline internals, examples) goes in the
@@ -27,6 +28,7 @@ with `--help` (module docstring plus argparse).
 | `ber_readme.py` | → README-style plot | The `img/ber-vs-snr.png` generator: runs one `ber.py` sweep per SF (per-SF pre-centered SNR windows) and overlays measured (solid, markers) with the closed-form theory (uncoded dashed, coded dotted), one color per SF, no titles. Give it saved sweep logs to replot instead of sweeping |
 | `regression.py` | → PASS/FAIL matrix | The commit gate: C-binary end-to-end decodes plus the real `data/capture*` frames in three netid arms. SKIPs (never FAILs) on a missing dep or unfetched LFS pointer |
 | `regression_perf.py` | → RTx matrix | The gate's speed twin: same verdicts plus the real-time multiplier per line. Verdicts gate the exit code, never the speed |
+| `probe_lib.sh` | header + libs → `yes` | The Makefile's dependency probe: compiles a throwaway program against a header/library to decide whether `rtl_lora`/`rsp_lora` can build. Run at make parse time, never part of compilation |
 | `prof/hotspots.py` | callgrind.out → tables | Function / hot-line / call-site Ir attribution from a callgrind profile (`--sort D1mr` for the cache view, `--callers NAME` for who-calls-what, `--selftest`). The workflow around it — build, run, interpretation — is the `profiling` skill |
 
 Shared CLI defaults: `--sf 7` (7–12), `--bw 125000`, `--os 2` samples/chip.

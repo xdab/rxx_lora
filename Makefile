@@ -28,6 +28,15 @@ DEV_SRC := $(SRC_DIR)/device_file.c $(SRC_DIR)/device_rtl.c $(SRC_DIR)/device_rs
 CORE_SRC := $(filter-out $(ENTRY_SRC) $(DEV_SRC), $(wildcard $(SRC_DIR)/*.c))
 CORE_OBJ := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(CORE_SRC))
 
+# Backend availability is probed, not assumed: file builds everywhere FFTW
+# does, rtl/rsp only when their header + library are found. RTL/RSP force a
+# verdict: RTL=0/RSP=0 skip, RTL=1/RSP=1 build (and fail if really missing).
+PROBE := tools/probe_lib.sh
+HAVE_RTL := $(shell $(PROBE) rtl-sdr.h -lrtlsdr)
+HAVE_RSP := $(shell $(PROBE) sdrplay_api.h -lsdrplay_api)
+BUILD_RTL := $(if $(RTL),$(filter 1,$(RTL)),$(HAVE_RTL))
+BUILD_RSP := $(if $(RSP),$(filter 1,$(RSP)),$(HAVE_RSP))
+
 FILE_BIN := $(BIN_DIR)/file_lora$(TARGET_SUFFIX)
 RTL_BIN := $(BIN_DIR)/rtl_lora$(TARGET_SUFFIX)
 RSP_BIN := $(BIN_DIR)/rsp_lora$(TARGET_SUFFIX)
@@ -37,7 +46,11 @@ COMPDB := compile_commands.json
 
 # file needs no SDR library; rtl needs librtlsdr only; rsp the SDRplay API only
 .PHONY: all file rtl rsp
-all: file rtl rsp
+all: file $(if $(BUILD_RTL),rtl) $(if $(BUILD_RSP),rsp)
+	@if [ -z '$(BUILD_RTL)' ]; then \
+		echo "✗ rtl_lora not built: librtlsdr not found (install it, or force with RTL=1)"; fi
+	@if [ -z '$(BUILD_RSP)' ]; then \
+		echo "✗ rsp_lora not built: SDRplay API not found (install it, or force with RSP=1)"; fi
 file: $(FILE_BIN)
 rtl: $(RTL_BIN)
 rsp: $(RSP_BIN)
@@ -68,8 +81,8 @@ BINDIR := $(PREFIX)/bin
 .PHONY: install
 install: all
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 755 $(FILE_BIN) $(RTL_BIN) $(RSP_BIN) $(DESTDIR)$(BINDIR)
-	@[ -z '$(TARGET_SUFFIX)' ] || for b in file_lora rtl_lora rsp_lora; do \
+	install -m 755 $(FILE_BIN) $(if $(BUILD_RTL),$(RTL_BIN)) $(if $(BUILD_RSP),$(RSP_BIN)) $(DESTDIR)$(BINDIR)
+	@[ -z '$(TARGET_SUFFIX)' ] || for b in file_lora $(if $(BUILD_RTL),rtl_lora) $(if $(BUILD_RSP),rsp_lora); do \
 		mv $(DESTDIR)$(BINDIR)/$$b$(TARGET_SUFFIX) $(DESTDIR)$(BINDIR)/$$b; \
 	done
 	@echo "✓ Installed to $(DESTDIR)$(BINDIR)"
@@ -150,11 +163,11 @@ doc:
 help:
 	@echo "rxx_lora Makefile Targets"
 	@echo "========================"
-	@echo "  all         - Build bin/file_lora, bin/rtl_lora, bin/rsp_lora (default)"
+	@echo "  all         - Build bin/file_lora + bin/rtl_lora and/or bin/rsp_lora when their libraries are found (default)"
 	@echo "  file        - Build bin/file_lora only (no SDR library needed)"
 	@echo "  rtl         - Build bin/rtl_lora only (needs librtlsdr, not the SDRplay API)"
 	@echo "  rsp         - Build bin/rsp_lora only (needs the SDRplay API, not librtlsdr)"
-	@echo "  install     - Install all three binaries to $(BINDIR)"
+	@echo "  install     - Install the built binaries to $(BINDIR)"
 	@echo "  profile     - Build *.prof binaries with debug symbols (valgrind/callgrind)"
 	@echo "  cov         - Build a *.cov binary with coverage instrumentation (gcov)"
 	@echo "  compdb      - Regenerate compile_commands.json (editor IntelliSense)"
@@ -165,7 +178,7 @@ help:
 	@echo "  tidy        - Static analysis gate over src/*.c (clang-tidy, .clang-tidy)"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make                # Build all three binaries"
+	@echo "  make                # Build what the installed libraries allow"
 	@echo "  make file|rtl|rsp   # Build one binary"
 	@echo "  make profile        # Profiling build"
 	@echo "  make clean          # Clean build artifacts"

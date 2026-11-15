@@ -72,7 +72,8 @@ Others are deliberate omissions - linked liquid-dsp was replaced with a scavenge
 ## Building, testing and running
 
 ```sh
-# The usual make targets
+# The usual make targets - rtl_lora/rsp_lora build only when librtlsdr /
+# the SDRplay API are detected; RTL=0 / RSP=0 skip them, RTL=1 / RSP=1 force
 make 
 sudo make install
 
