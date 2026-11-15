@@ -52,7 +52,7 @@ static void live_timeout_fired(void)
 static inline void live_on_signal(int sig)
 {
 #if defined(_WIN32)
-    (void)sig; // no SIGALRM on Windows
+    (void)sig;
     if (g_dev)
         device_stop(g_dev);
 #else

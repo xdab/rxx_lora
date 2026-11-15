@@ -89,10 +89,7 @@ jobs:
       - name: Build
         run: make bin/file_lora bin/rtl_lora
 
-  # Windows portability proof, sibling of distro-build: the UCRT64 toolchain
-  # the Makefile's Windows_NT block targets. The dlls target stages the runtime
-  # DLLs beside the gate binary, so regression runs from a self-contained bin/,
-  # as the zipped distribution ships it.
+  # Windows portability proof: UCRT64 build + regression from a self-contained bin/
   windows-build:
     runs-on: windows-latest
     steps:

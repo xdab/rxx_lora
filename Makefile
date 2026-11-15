@@ -6,33 +6,19 @@ RSP_LIBS := -lsdrplay_api
 
 # Windows: the SDRplay API is a system install, not a pacman package
 ifeq ($(OS),Windows_NT)
-# pin make's own flavor of sh: PATH can offer a foreign MSYS flavor's (e.g.
-# Git Bash's), whose /ucrt64 mount points somewhere else entirely
+# pin make's own sh: a foreign MSYS flavor in PATH (e.g. Git Bash) mounts /ucrt64 elsewhere
 SHELL := /bin/sh
 SDRPLAY_HOME ?= "C:/Program Files/SDRplay/API"
 CFLAGS += -I$(SDRPLAY_HOME)/inc
 RSP_LIBS += -L$(SDRPLAY_HOME)/x64
 # the probe compiles without CFLAGS, so feed it the SDK paths explicitly
 SDRPLAY_PROBE_FLAGS := -I$(SDRPLAY_HOME)/inc -L$(SDRPLAY_HOME)/x64
-# ship the runtime DLLs beside the binaries: DLL search starts in the
-# application directory, so a zipped bin/ runs on any Windows box without the
-# toolchain installed. The set is derived, not listed: read each built image's
-# import table with objdump and stage every imported name the toolchain bin
-# ships — fftw, librtlsdr, libusb (GPL-2+/LGPL-2.1, compatible with this GPL-3
-# repo) and the like. System DLLs drop out on the existence check, and the
-# proprietary sdrplay_api.dll can't sneak in: it lives in the vendor SDK dir,
-# not the toolchain — rsp_lora users install the SDRplay API themselves.
-# objdump, not ldd: the loader resolves through whatever happens to sit in
-# System32/PATH, the import table doesn't. Two passes close the chain one
-# level down (libusb rides on librtlsdr).
-# where the toolchain DLLs come from: the bin dir of the very $(CC) compiling,
-# asked from the compiler itself — -print-search-dirs' install line reads
-# <root>/bin/../lib/gcc/<triple>/<ver>; gcc is a native binary, so this is a
-# physical C:/ path no matter which MSYS flavor's sh runs the recipe. A PATH
-# lookup (command -v / where) would instead race whatever gcc other installs
-# put first, and a POSIX /ucrt64 path would only resolve under one flavor
+# stage every import-table DLL that exists in the toolchain bin beside the
+# binaries (DLL search starts there); two passes close the chain one level
+# down. System DLLs and the non-redistributable sdrplay_api.dll drop out on
+# the existence check.
 GCC_ROOT := $(shell LC_ALL=C $(CC) -print-search-dirs 2>/dev/null | tr -d '\r' | sed -n '/^install: /{s|^install: ||;s|/lib/gcc/.*||;s|/bin/\.\.||;p}')
-UCRT64_BIN ?= $(GCC_ROOT)/bin
+UCRT64_BIN ?= $(GCC_ROOT)/bin # gcc's own bin dir: a PATH lookup races other installs
 DLL_IMPORTS := sed -n 's/[[:space:]]*DLL Name: //p'
 STAGE_DLLS = while read dll; do [ -f $(UCRT64_BIN)/$$dll ] && echo $(UCRT64_BIN)/$$dll; done | sort -u | xargs -r cp -t $(BIN_DIR)/
 
