@@ -51,14 +51,12 @@ Others are deliberate omissions - linked liquid-dsp was replaced with a scavenge
 
 ### **C** (main project)
 
-| Dependency | For | Debian/Ubuntu | Fedora | Arch |
-|------------|-----|---------------|--------|------|
-| modern C compiler + `make` | building | `build-essential` | `gcc` `make` | `base-devel` |
-| [FFTW](https://www.fftw.org) v3 + headers | all binaries | `libfftw3-dev` | `fftw` `fftw-devel` | `fftw` |
-| [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers | `rtl_lora` | `librtlsdr0` `librtlsdr-dev` | `rtl-sdr` `rtl-sdr-devel` | `rtl-sdr` |
-| [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers | `rsp_lora` | vendor's `.run` installer | vendor's `.run` installer | vendor's `.run` installer |
-| `clang-format` *(optional)* | `make fmt` | `clang-format` | `clang-tools-extra` | `clang` |
-| `clang-tidy` *(optional)* | `make tidy` | `clang-tidy` | `clang-tools-extra` | `clang` |
+| Platform | Compiler + `make` *(building)* | [FFTW](https://www.fftw.org) v3 + headers *(all binaries)* | [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) + headers *(`rtl_lora`)* | [SDRplay API](https://www.sdrplay.com/downloads/) v3 + headers *(`rsp_lora`)* | `clang-format` *(optional, `make fmt`)* | `clang-tidy` *(optional, `make tidy`)* |
+|----------|--------------------------------|------------------------------|------------------|------------------------|----------------------------------------|----------------------------------------|
+| Debian/Ubuntu | `build-essential` | `libfftw3-dev` | `librtlsdr0` `librtlsdr-dev` | vendor's `.run` installer | `clang-format` | `clang-tidy` |
+| Fedora | `gcc` `make` | `fftw` `fftw-devel` | `rtl-sdr` `rtl-sdr-devel` | vendor's `.run` installer | `clang-tools-extra` | `clang-tools-extra` |
+| Arch | `base-devel` | `fftw` | `rtl-sdr` | vendor's `.run` installer | `clang` | `clang` |
+| Windows (MSYS2 UCRT64) | `make` `mingw-w64-ucrt-x86_64-gcc` | `mingw-w64-ucrt-x86_64-fftw` | `mingw-w64-ucrt-x86_64-rtl-sdr` | [vendor installer](https://sdrplay.com/hardware-api/) | `mingw-w64-ucrt-x86_64-clang` | `mingw-w64-ucrt-x86_64-clang-tools-extra` |
 
 ### **Python** (optional, helper tools)
 
@@ -106,11 +104,10 @@ python3 tools/mesh_rx.py --center-freq 869.525e6 -s9 -w 0x2b --bw 250e3 4
 ```
 
 **Windows:** build under [MSYS2](https://www.msys2.org)'s UCRT64 environment
-(`pacman -S make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-fftw mingw-w64-ucrt-x86_64-rtl-sdr`;
-the SDRplay API comes from the vendor's installer). `make all` additionally
-stages the runtime DLLs beside the binaries, so `bin/` runs standalone on
-Windows 10+. Only `sdrplay_api.dll` is not shipped — its EULA grants no
-redistribution — so `rsp_lora` still needs the API install.
+(deps in the table above). `make all` additionally stages the runtime DLLs
+beside the binaries, so `bin/` runs standalone on Windows 10+. Only
+`sdrplay_api.dll` is not shipped — its EULA grants no redistribution — so
+`rsp_lora` still needs the API install.
 
 ## Performance
 
