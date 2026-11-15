@@ -18,7 +18,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-// dsp_cpx and fftwf_complex are both two contiguous floats.
+#include "volk.h"
+
+// dsp_cpx, fftwf_complex and VOLK's lv_32fc_t are all two contiguous floats.
 _Static_assert(sizeof(dsp_cpx) == sizeof(fftwf_complex), "dsp_cpx must match fftwf_complex layout");
 
 struct dsp_fft_state
@@ -111,12 +113,7 @@ static float sinc_pi(float x)
 
 void dsp_dechirp_pack(dsp_cpx *dst, const float complex *x, const float complex *ref, uint32_t n)
 {
-    for (uint32_t j = 0; j < n; j++)
-    {
-        float complex v = x[j] * ref[j];
-        dst[j].r = crealf(v);
-        dst[j].i = cimagf(v);
-    }
+    volk_32fc_x2_multiply_32fc((lv_32fc_t *)(void *)dst, x, ref, n);
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // (nt, step, beta) is the design tuple, cold path
@@ -232,10 +229,10 @@ void dc_block_apply(struct dc_block *d, float complex *x, size_t n)
 
 float dsp_frac_peak(const float *sp, uint32_t len, float *pk)
 {
-    uint32_t k = 0;
-    for (uint32_t i = 1; i < len; i++)
-        if (sp[i] > sp[k])
-            k = i;
+    // first-max tie rule: the interpolated peak shifts if a later equal
+    // maximum won
+    uint32_t k;
+    volk_32f_index_max_32u(&k, sp, len);
 
     uint32_t km = (k + len - 1) % len, kp = (k + 1) % len;
     float dl = 0.5f * (sp[km] - sp[kp]) / (sp[km] - 2.0f * sp[k] + sp[kp] + 1e-12f);

@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 // port-side: exact resync period for the sliding detect-mean sum, in windows
 #define DETECT_SUM_RESYNC 1024
 
@@ -37,14 +39,10 @@ static int get_symbol_val_detect(
         // resync bounds fp drift far below any margin
         float *slot = &s->detect_mag_hist[(size_t)s->detect_hist_pos * n];
         int full = s->detect_hist_fill == s->detect_avg;
-        for (uint32_t b = 0; b < n; b++)
-        {
-            float sum = s->detect_mag_sum[b];
-            if (full)
-                sum -= slot[b];
-            slot[b] = s->fft_mag[b];
-            s->detect_mag_sum[b] = sum + slot[b];
-        }
+        if (full)
+            volk_32f_x2_subtract_32f(s->detect_mag_sum, s->detect_mag_sum, slot, n);
+        memcpy(slot, s->fft_mag, n * sizeof(*slot));
+        volk_32f_x2_add_32f(s->detect_mag_sum, s->detect_mag_sum, slot, n);
 
         s->detect_hist_pos = (uint8_t)((s->detect_hist_pos + 1) % s->detect_avg);
         if (s->detect_hist_fill < s->detect_avg)
@@ -72,28 +70,35 @@ static int get_symbol_val_detect(
     int best = 0, second = -1;
     float best_score = -1.0f, second_score = -1.0f;
 
+    /* The 3-bin score is a cyclic 3-tap sliding sum: stage the spectrum with
+     * both wrapped edges materialized, then two whole-vector adds give the
+     * score vector and the argmax kernel picks the bin (first-max tie rule:
+     * later equal maxima must not win). */
+    float *staged = s->detect_score; // n + 2 staged bins
+    float *score = staged + n + 2;   // n scores
+    staged[0] = mag[n - 1];
+    memcpy(staged + 1, mag, n * sizeof(*staged));
+    staged[n + 1] = mag[0];
+    volk_32f_x2_add_32f(score, staged, staged + 1, n);
+    volk_32f_x2_add_32f(score, score, staged + 2, n);
+    uint32_t best_u;
+    volk_32f_index_max_32u(&best_u, score, n);
+    best = (int)best_u;
+    best_score = score[best];
+
+    // runner-up feeds the trace prints only
     for (uint32_t b = 0; b < n; b++)
-    {
-        float score = mag[b] + mag[(b + 1) % n] + mag[(b + n - 1) % n];
-        if (score > best_score)
+        if ((int)b != best && score[b] > second_score)
         {
-            second = best;
-            second_score = best_score;
-            best_score = score;
-            best = (int)b;
-        }
-        else if (score > second_score)
-        {
-            second_score = score;
+            second_score = score[b];
             second = (int)b;
         }
-    }
 
     /* Deviation: half-bin self-tie break. Near +-1/2 bin offsets the 3-bin
      * scores tie and flap 2 bins apart (the 3-bin sum of a single sharp peak
      * maximizes one bin OFF the peak); trust the raw argmax there, which can
      * only turn such a step into a tolerated 1-bin one. */
-    float raw_score = mag[raw] + mag[(raw + 1) % n] + mag[(raw + n - 1) % n];
+    float raw_score = score[raw];
     int decision = best;
     if (raw_score >= best_score - 0.10f * best_score &&
         util_mod(labs(raw - best) + 1, (int)n) - 1 <= 1)

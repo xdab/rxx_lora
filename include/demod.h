@@ -29,6 +29,10 @@ struct demod_state
     dsp_cpx *cx_in;           // FFT input
     dsp_cpx *cx_out;          // FFT output
     float *fft_mag;           // magnitude-squared spectrum
+    // soft-LLR scratch: per bit, an N-point 0/1 mask of the bins carrying
+    // that bit (the gray mapping is fixed per SF, built once in init)
+    float *llr_mask; // sf rows of N mask floats
+    float *llr_w;    // per-bin soft weight of the last window
 };
 
 /**

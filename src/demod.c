@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "volk.h"
+
 /* Reference: [gr-lora_sdr] fft_demod_impl.cc:26,283-289; [gr-lora] demod_impl.cc:54,96-101. */
 int demod_init(struct demod_state *s, uint8_t sf)
 {
@@ -25,11 +27,30 @@ int demod_init(struct demod_state *s, uint8_t sf)
     s->cx_in = malloc(s->number_of_bins * sizeof(*s->cx_in));
     s->cx_out = malloc(s->number_of_bins * sizeof(*s->cx_out));
     s->fft_mag = malloc(s->number_of_bins * sizeof(*s->fft_mag));
-    if (!s->upchirp || !s->downchirp || !s->cx_in || !s->cx_out || !s->fft_mag)
+    s->llr_mask = malloc((size_t)sf * s->number_of_bins * sizeof(*s->llr_mask));
+    s->llr_w = malloc(s->number_of_bins * sizeof(*s->llr_w));
+    if (!s->upchirp || !s->downchirp || !s->cx_in || !s->cx_out || !s->fft_mag || !s->llr_mask ||
+        !s->llr_w)
     {
         log_error("demod_init: out of memory\n");
         demod_cleanup(s);
         return -1;
+    }
+
+    /* Soft-LLR bin masks: for each bit j (MSB first), 1.0 on the bins whose
+     * gray-mapped symbol value carries that bit. The half-space sums become
+     * dot products of the weight vector against these masks; the mapping is
+     * fixed, so they are built once here. */
+    for (uint8_t j = 0; j < sf; j++)
+    {
+        uint32_t shift = sf - 1 - j;
+        float *row = s->llr_mask + (size_t)j * s->number_of_bins;
+        for (uint32_t b = 0; b < s->number_of_bins; b++)
+        {
+            uint32_t g = (b + s->number_of_bins - 1) & (s->number_of_bins - 1);
+            uint32_t v = g ^ (g >> 1);
+            row[b] = ((v >> shift) & 1u) ? 1.0f : 0.0f;
+        }
     }
 
     s->fft_cfg = dsp_fft_alloc((int)s->number_of_bins);
@@ -78,6 +99,8 @@ void demod_cleanup(struct demod_state *s)
     free(s->cx_in);
     free(s->cx_out);
     free(s->fft_mag);
+    free(s->llr_mask);
+    free(s->llr_w);
     if (s->fft_cfg)
         dsp_fft_free(s->fft_cfg);
     memset(s, 0, sizeof(*s));
@@ -104,13 +127,9 @@ float demod_snr(const struct demod_state *s)
 int demod_step(struct demod_state *s, const float complex *in)
 {
     // deviation: the reference dechirps into a separate buffer (volk) and
-    // converts it to the FFT input in a second pass — same values, one pass
-    for (uint32_t i = 0; i < s->number_of_bins; i++)
-    {
-        float complex v = in[i] * s->downchirp[i];
-        s->cx_in[i].r = crealf(v);
-        s->cx_in[i].i = cimagf(v);
-    }
+    // converts it to the FFT input in a second pass — same values, one pass;
+    // dsp_cpx is layout-identical to lv_32fc_t (two contiguous floats)
+    volk_32fc_x2_multiply_32fc((lv_32fc_t *)(void *)s->cx_in, in, s->downchirp, s->number_of_bins);
 
     dsp_fft(s->fft_cfg, s->cx_in, s->cx_out);
 
@@ -119,12 +138,13 @@ int demod_step(struct demod_state *s, const float complex *in)
      * must not inflate the estimate, and summing the tone in to subtract it
      * later would cancel catastrophically on strong clean tones. The floor
      * is cached; demod_snr() and demod_soft_llrs() never rescan. */
+    volk_32fc_magnitude_squared_32f(s->fft_mag, (lv_32fc_t *)(void *)s->cx_out, s->number_of_bins);
+
     float mmax = 0, m2 = -1.0f;
     int max = 0;
     for (uint32_t i = 0; i < s->number_of_bins; i++)
     {
-        float m = s->cx_out[i].r * s->cx_out[i].r + s->cx_out[i].i * s->cx_out[i].i;
-        s->fft_mag[i] = m;
+        float m = s->fft_mag[i];
         if (m > mmax)
         {
             m2 = mmax;
@@ -137,13 +157,22 @@ int demod_step(struct demod_state *s, const float complex *in)
         }
     }
     uint32_t n = s->number_of_bins;
-    uint32_t b = (uint32_t)((max + DEMOD_SNR_BLANK + 1) % (int)n);
-    float nsum = 0;
-    for (uint32_t k = 0; k < n - (2 * DEMOD_SNR_BLANK + 1); k++)
+    /* The blanked skirt (2*BLANK+1 bins centered on the tone) splits the
+     * non-blanked bins into at most two contiguous runs; accumulate the
+     * runs directly — the tone bin must never enter the sum, or float
+     * rounding of the huge tone absorbs the noise floor entirely. */
+    uint32_t start = (uint32_t)((max + DEMOD_SNR_BLANK + 1) % (int)n);
+    uint32_t cnt = n - (2 * DEMOD_SNR_BLANK + 1);
+    float nsum = 0.0f, part;
+    if (start + cnt <= n)
     {
-        nsum += s->fft_mag[b];
-        if (++b == n)
-            b = 0;
+        volk_32f_accumulator_s32f(&nsum, s->fft_mag + start, cnt);
+    }
+    else
+    {
+        volk_32f_accumulator_s32f(&part, s->fft_mag + start, n - start);
+        volk_32f_accumulator_s32f(&nsum, s->fft_mag, start + cnt - n);
+        nsum += part;
     }
     s->symbol_val = (int)util_mod(max - 1, s->number_of_bins);
     s->peak_mag = mmax;
@@ -168,27 +197,29 @@ int demod_step(struct demod_state *s, const float complex *in)
  * right after demod_step() (fft_mag is overwritten by the next call). */
 void demod_soft_llrs(struct demod_state *s, float *llr)
 {
-    float sum[12][2] = {{0}}; // per-bit half-space sums, [j][bit]
-    float mmax = s->peak_mag, noise = s->noise_floor, a;
-    uint32_t b;
+    float mmax = s->peak_mag, noise = s->noise_floor;
+    uint32_t n = s->number_of_bins;
+    const float *mask;
     uint8_t j;
+    float a, wtot, s1;
 
     // a = lambda/(1+lambda) in floor units; 0 (no information) when the
     // spectrum is flat or silent
     a = (mmax > noise && noise > 0.0f) ? (mmax - noise) / (mmax * noise) : 0.0f;
 
-    for (b = 0; b < s->number_of_bins; b++)
-    {
-        // tone at bin b means symbol value g = mod(b - 1, N); the bit the
-        // deinterleaver reads belongs to the gray-mapped v = g ^ (g>>1)
-        uint32_t g = (b + s->number_of_bins - 1) & (s->number_of_bins - 1);
-        uint32_t v = g ^ (g >> 1);
-        float w = expf(a * (s->fft_mag[b] - mmax));
+    for (uint32_t b = 0; b < n; b++)
+        s->llr_w[b] = expf(a * (s->fft_mag[b] - mmax));
 
-        for (j = 0; j < s->spreading_factor; j++)
-            sum[j][(v >> (s->spreading_factor - 1 - j)) & 1u] += w;
-    }
-
+    /* The bin->bit masks are prebuilt per bit (see demod_init), so each
+     * half-space sum is a dot of the weights against a 0/1 vector; the
+     * opposite half is the total minus that dot (the weights are >= 0, and
+     * the eps below bounds the path where the subtraction loses the last
+     * ulps of a vanishing half-sum). */
+    volk_32f_accumulator_s32f(&wtot, s->llr_w, n);
     for (j = 0; j < s->spreading_factor; j++)
-        llr[j] = logf((sum[j][1] + DEMOD_SOFT_EPS) / (sum[j][0] + DEMOD_SOFT_EPS));
+    {
+        mask = s->llr_mask + (size_t)j * n;
+        volk_32f_x2_dot_prod_32f(&s1, s->llr_w, mask, n);
+        llr[j] = logf((s1 + DEMOD_SOFT_EPS) / (wtot - s1 + DEMOD_SOFT_EPS));
+    }
 }
