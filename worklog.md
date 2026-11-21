@@ -34,6 +34,19 @@ resolves Depends: libfftw3-single3, librtlsdr0). The .deb binaries are built
 with portable CFLAGS (`make CFLAGS=...` command-line override — no Makefile
 change, honoring the workflows-only constraint).
 
+### 2026-11-21 12:00 — milestone: Linux bin tarball + RPM added; 5 assets on the draft
+
+The Linux binary tarball reuses the deb job's stripped portable bookworm build
+(same binaries, one toolchain — no duplicated compile). RPM: `fedora:latest`
+container, prebuilt-binaries spec, **AutoReqProv on** so rpmbuild derives
+`libfftw3f.so.3`/`librtlsdr.so.0` deps from SONAMEs instead of guessing Fedora
+package names; `dnf install` of the produced rpm validates them for real.
+First rpm attempt failed twice (docs not copied into `rpmbuild/SOURCES`;
+Fedora's `source_date_epoch_from_changelog` demands a `%changelog` entry).
+Two fixes → green. User-visible note: they initially looked at
+`/releases/tag/v1.0.0`, which never shows draft assets — the draft lives
+under Releases with a Draft badge (publishing stays the owner's click).
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,
