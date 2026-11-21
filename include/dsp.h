@@ -42,10 +42,6 @@ void dsp_fft_free(dsp_fft_cfg cfg);
  * Streaming first-order IIR DC blocker (one-pole high-pass):
  *
  *     y[n] = x[n] - x[n-1] + r*y[n-1],   r = 1 - 2*pi*corner/rate
- *
- * State carries across calls, so arbitrarily chunked input filters the same as
- * one block. Used at the head of the receive chain to strip the zero-IF tuner's
- * DC offset and 1/f junk before it reaches DETECT.
  */
 struct dc_block
 {

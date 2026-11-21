@@ -80,27 +80,39 @@ void dsp_fft_free(dsp_fft_cfg cfg)
  * Kaiser window uses). */
 static float besseli0(float x)
 {
+    static const float c_lo[] = {
+        3.5156229f, 3.0899424f, 1.2067492f, 0.2659732f, 0.0360768f, 0.0045813f};
+    static const float c_hi[] = {0.39894228f,
+                                 0.01328592f,
+                                 0.00225319f,
+                                 -0.00157565f,
+                                 0.00916281f,
+                                 -0.02057706f,
+                                 0.02635537f,
+                                 -0.01647633f,
+                                 0.00392377f};
+
     float ax = fabsf(x);
 
     if (ax < 3.75f)
     {
+        const int n = (int)(sizeof(c_lo) / sizeof(*c_lo));
+        float acc = c_lo[n - 1];
         float t = x / 3.75f;
+
         t *= t;
-        return 1.0f +
-               t * (3.5156229f +
-                    t * (3.0899424f +
-                         t * (1.2067492f + t * (0.2659732f + t * (0.0360768f + t * 0.0045813f)))));
+        for (int k = n - 2; k >= 0; k--)
+            acc = c_lo[k] + t * acc;
+        return 1.0f + t * acc;
     }
 
+    const int n = (int)(sizeof(c_hi) / sizeof(*c_hi));
+    float acc = c_hi[n - 1];
     float y = 3.75f / ax;
-    return (expf(ax) / sqrtf(ax)) *
-           (0.39894228f +
-            y * (0.01328592f +
-                 y * (0.00225319f +
-                      y * (-0.00157565f +
-                           y * (0.00916281f +
-                                y * (-0.02057706f +
-                                     y * (0.02635537f + y * (-0.01647633f + y * 0.00392377f))))))));
+
+    for (int k = n - 2; k >= 0; k--)
+        acc = c_hi[k] + y * acc;
+    return (expf(ax) / sqrtf(ax)) * acc;
 }
 
 // sinc(x) = sin(pi*x)/(pi*x), with the small-argument product form for accuracy
