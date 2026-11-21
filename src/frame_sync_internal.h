@@ -2,6 +2,9 @@
  * @file frame_sync_internal.h
  * @brief The frame-sync state, private to frame_sync.c, detect.c and sync.c.
  *        The public contract lives in include/frame_sync.h.
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:254,573,625,667 (sync.c's
+ * static helpers).
  */
 
 #ifndef FRAME_SYNC_INTERNAL_H

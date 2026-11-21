@@ -109,7 +109,7 @@ int frame_sync_detect_step(struct frame_sync *fs, const float complex *in, int64
  * @return 1 once the sync word is accepted, 0 while walking, -1 on a
  *         sync-word mismatch (the state resets to DETECT)
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:545; [gr-lora] demod_impl.cc:279.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:545-841; [gr-lora] demod_impl.cc:279.
  */
 int frame_sync_sync_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);
 
@@ -125,7 +125,7 @@ int frame_sync_sync_step(struct frame_sync *fs, const float complex *in, uint32_
  * @return the corrected window (valid until the next call), or NULL when the
  *         symbol budget is spent
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:845.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:845-871.
  */
 const float complex *
 frame_sync_output_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);
