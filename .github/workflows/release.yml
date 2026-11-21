@@ -101,14 +101,14 @@ jobs:
       - name: Stage docs + strip
         run: |
           strip --strip-unneeded stage/usr/bin/*
-          install -d stage/usr/share/doc/rxx_lora
-          install -m 644 README.md LICENSE.md stage/usr/share/doc/rxx_lora/
+          install -d stage/usr/share/doc/rxx-lora
+          install -m 644 README.md LICENSE.md stage/usr/share/doc/rxx-lora/
 
       - name: Package metadata
         run: |
           install -d stage/DEBIAN
           printf '%s\n' \
-            "Package: rxx_lora" \
+            "Package: rxx-lora" \
             "Version: ${{ steps.ver.outputs.version }}" \
             "Section: comm" \
             "Priority: optional" \
@@ -128,14 +128,14 @@ jobs:
       - name: dpkg-deb
         run: |
           arch="$(dpkg --print-architecture)"
-          dpkg-deb --build --root-owner-group stage "rxx_lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+          dpkg-deb --build --root-owner-group stage "rxx-lora_${{ steps.ver.outputs.version }}_${arch}.deb"
           # dependency names and file layout resolved against bookworm's index
-          apt-get install -y --dry-run "./rxx_lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+          apt-get install -y --dry-run "./rxx-lora_${{ steps.ver.outputs.version }}_${arch}.deb"
 
       - uses: actions/upload-artifact@v4
         with:
           name: deb-assets
-          path: rxx_lora_*.deb
+          path: rxx-lora_*.deb
 
   # Single owner of the Releases page: fresh SHA256SUMS over every asset,
   # draft release created if missing, all assets clobbered onto it
