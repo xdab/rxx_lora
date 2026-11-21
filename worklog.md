@@ -77,6 +77,20 @@ the same tagged content — decisions.md #1 resolved; publish job excludes
 source-assets, the published rxx_lora-1.0.0.tar.gz asset was deleted, the
 gate stays), and keep the fc45 dist tag (decisions.md #6 half-resolved).
 
+### 2026-11-21 12:20 — GOAL COMPLETE: all targets on the published v1.0.0
+
+Final run 44903013127 all green. Independent verification from a fresh
+download: all four assets match SHA256SUMS; win64 zip is self-contained
+(file_lora.exe + rtl_lora.exe + libfftw3f-3/librtlsdr/libusb-1.0/
+libwinpthread-1 DLLs + docs); linux-x86_64 tarball carries bin/ + docs.
+One publish iteration lost to download-artifact@v4: its `pattern` input does
+NOT support `!` exclusions — matched 0 of 5 artifacts; fixed by removing the
+gate-only tarball by exact name before checksumming.
+
+Final release shape (v1.0.0, published): deb, rpm, linux-x86_64 tarball,
+win64 zip, SHA256SUMS + GitHub's auto source snapshots. 32-bit Windows: not
+possible from packaged toolchains (decisions.md #5).
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,
