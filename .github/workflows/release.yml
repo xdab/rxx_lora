@@ -154,11 +154,89 @@ jobs:
           name: deb-assets
           path: rxx-lora_*.deb
 
+  # Fedora RPM: same portable build, packaged by rpmbuild. AutoReqProv stays
+  # on — dependencies (libfftw3f, librtlsdr) are derived from the binaries'
+  # SONAMEs, so no package names are guessed; `dnf install` of the result
+  # validates that they resolve against Fedora's repos
+  build-rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Toolchain
+        run: dnf install -y gcc make git fftw-devel rtl-sdr-devel python3-numpy rpm-build
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build + gate
+        run: |
+          make CFLAGS="-O3 -Wall -Wextra -I./include" file rtl
+          python3 tools/regression.py --no-capture
+
+      - name: Package
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          # prebuilt binaries ride in SOURCES; rpmbuild strips and derives
+          # the SONAME dependencies itself
+          for d in BUILD RPMS SOURCES SPECS SRPMS; do mkdir -p rpmbuild/$d; done
+          install -m 755 bin/file_lora bin/rtl_lora rpmbuild/SOURCES/
+          printf '%s\n' \
+            "Name:           rxx-lora" \
+            "Version:        $v" \
+            "Release:        1%{?dist}" \
+            "Summary:        LoRa (CSS) receiver for RTL-SDR dongles and SDRplay RSPs" \
+            "License:        GPLv3+" \
+            "URL:            https://github.com/xdab/rxx_lora" \
+            "" \
+            "%description" \
+            "A plug-and-play LoRa receiver in the spirit of rtl_fm: SDR in," \
+            "decoded packets out on stdout and JSONL, no GNU Radio." \
+            "" \
+            "Ships file_lora (decode I/Q recordings) and rtl_lora (live RTL-SDR" \
+            "reception). rsp_lora needs the proprietary SDRplay API, which is" \
+            "not redistributable; install it from the vendor." \
+            "" \
+            "%prep" \
+            "%build" \
+            "%install" \
+            "mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_docdir}/%{name}" \
+            "install -m 755 %{_sourcedir}/file_lora %{buildroot}%{_bindir}/" \
+            "install -m 755 %{_sourcedir}/rtl_lora %{buildroot}%{_bindir}/" \
+            "install -m 644 %{_sourcedir}/README.md %{_sourcedir}/LICENSE.md %{buildroot}%{_docdir}/%{name}/" \
+            "" \
+            "%files" \
+            "%{_bindir}/file_lora" \
+            "%{_bindir}/rtl_lora" \
+            "%{_docdir}/%{name}" \
+            > rpmbuild/SPECS/rxx-lora.spec
+          rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/rxx-lora.spec
+          mv rpmbuild/RPMS/*/*.rpm .
+          # the real test: resolves the auto-derived dependencies for real
+          dnf install -y ./rxx-lora-*.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-assets
+          path: rxx-lora-*.rpm
+
   # Single owner of the Releases page: fresh SHA256SUMS over every asset,
   # draft release created if missing, all assets clobbered onto it
   publish:
     if: github.ref_type == 'tag'
-    needs: [build-source, build-deb]
+    needs: [build-source, build-deb, build-rpm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
