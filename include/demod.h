@@ -11,6 +11,13 @@
 
 #include "dsp.h"
 
+/**
+ * Hard symbol demodulator state, one instance per stream: it dechirps each
+ * symbol window with the CFO-adapted reference chirp, takes the N-point FFT
+ * and reads the tone off the magnitude spectrum. Carries the reference
+ * chirps, the FFT plan and scratch, and the last window's results (symbol
+ * value, peak, noise floor) that the SNR and soft-LLR outputs read.
+ */
 struct demod_state
 {
     // configuration
@@ -56,16 +63,23 @@ int demod_init(struct demod_state *s, uint8_t sf);
  *
  * @param[in,out] s state from demod_init()
  * @param[in] cfo carrier-frequency offset in FFT bins
+ *
+ * Reference: [gr-lora] demod_impl.cc:96-101.
  */
 void demod_reset(struct demod_state *s, float cfo);
 
 /**
  * @brief Release everything demod_init() allocated.
+ *
+ * Reference: [gr-lora_sdr] fft_demod_impl.cc:62; [gr-lora] demod_impl.cc:109.
  */
 void demod_cleanup(struct demod_state *s);
 
 /**
  * @brief On-channel SNR of the last demodulated window, linear.
+ *
+ * The dechirp folds the spreading gain into the tone bin — 10*log10(N) dB
+ * above the on-channel SNR — and dividing by N undoes it.
  *
  * @param[in] s state after at least one demod_step
  * @return the linear ratio, 0 when the spectrum is all zeros or the tone is
@@ -77,24 +91,33 @@ float demod_snr(const struct demod_state *s);
  * @brief Demodulate one N-point symbol window.
  *
  * Dechirp with the adapted downchirp, N-point FFT, argmax, then the LoRa
- * symbol map mod(idx - 1, N).
+ * symbol map mod(idx - 1, N). Also caches the peak's magnitude and the
+ * noise-floor mean (all bins except the tone and its 2-bin skirt each
+ * side) for demod_snr() and demod_soft_llrs().
  *
  * @param[in,out] s initialized state
  * @param[in] in window start; N samples must be readable
  * @return the demodulated symbol value, also stored in symbol_val
  *
- * Reference: [gr-lora_sdr] fft_demod_impl.cc:262; [gr-lora] demod_impl.cc:174-206.
+ * Reference: [gr-lora_sdr] fft_demod_impl.cc:262,301; [gr-lora] demod_impl.cc:174-206.
  */
 int demod_step(struct demod_state *s, const float complex *in);
 
 /**
  * @brief Per-bit LLRs of the last demod_step() window, from its bin
- *        energies; see demod.c for the metric.
+ *        energies. Valid only right after demod_step() (its spectrum is
+ *        overwritten by the next call).
+ *
+ * The soft twin of demod_step()'s argmax: with m the bin magnitudes, m_max
+ * the peak and floor the cached noise-floor mean, the weight of bin v is
+ * exp(a*(m - m_max)) with a = (m_max - floor)/(m_max*floor) — the
+ * per-window tone SNR's λ/(1+λ), so it self-calibrates. Bit j's LLR is the
+ * log ratio of the summed weights over the bins whose gray-mapped symbol
+ * value carries bit j set vs clear (MSB first), matching the bit the
+ * deinterleaver extracts. A 1e-12 epsilon caps |llr| on clean windows.
  *
  * @param[in] s state with a fresh demod_step() result
- * @param[out] llr sf floats; llr[j] = LLR that bit j (MSB first) of the
- *             gray-mapped symbol value is 1, matching the bit the
- *             deinterleaver (deinterleave_soft) extracts
+ * @param[out] llr sf floats
  */
 void demod_soft_llrs(struct demod_state *s, float *llr);
 
