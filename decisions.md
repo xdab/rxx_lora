@@ -49,10 +49,34 @@ effort is workflows-only (no code changes). Recorded so the next code-touching
 session picks it up; also the reason shipped deb/rpm binaries can't
 self-identify yet.
 
-## 4. When to publish the draft releases
+## 4. When to publish the draft releases — RESOLVED 2026-11-21
 
-The pipeline attaches everything to DRAFT releases (only the owner sees them;
-asset URLs become semi-permanent once users depend on them). Publishing
-`v1.0.0` (and later tags) is a human click on
-https://github.com/xdab/rxx_lora/releases — deliberate: not delegated to the
-autonomous run.
+Originally: drafts only, publishing stays a human click. The owner resolved it
+mid-run: "publish the Linux assets; amend later with Windows binaries" —
+confirmed that published releases can take added assets later. `v1.0.0` was
+published with the five Linux assets; Windows zips are amended onto it by the
+publish job on the next tag run. For FUTURE tags the draft-first flow
+continues unless the owner says otherwise.
+
+## 5. Windows 32-bit arm — build it at all?
+
+**Blocked fact**: MSYS2's i686 repo no longer packages `mingw-w64-i686-fftw`
+nor `mingw-w64-i686-rtl-sdr` ("target not found", run 44902315387). The
+project's own toolchain path cannot produce a 32-bit build. Remaining options:
+
+- **Drop the 32-bit arm (recommended)** — 64-bit is the primary goal; a 32-bit
+  build would require cross-building FFTW + libusb + librtlsdr from source for
+  i686-mingw (or pinning dead package mirrors), a permanent maintenance burden
+  for a legacy audience. The 32-bit job was removed from the workflow.
+- **From-source i686 dependency farm** — a Linux job cross-compiles the three
+  deps then the receiver; roughly +100 lines of workflow and ongoing upkeep.
+
+Context: goal phrasing was "Windows 32-bit if possible" — it is not, from
+packaged toolchains. Nothing else in the pipeline waits on this.
+
+## 6. Minor naming choices (batch, decide anytime)
+
+- **RPM dist tag**: `Release: 1%{?dist}` yields `1.fc45` (the Fedora release
+  built on). Keep (standard, informative) vs drop (`1.x86_64.rpm`). Also note
+  `fedora:latest` floats — pin a versioned Fedora if the tag must be stable.
+- **Source tarball vs auto snapshots**: see #1.

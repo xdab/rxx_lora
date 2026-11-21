@@ -47,6 +47,26 @@ Two fixes → green. User-visible note: they initially looked at
 `/releases/tag/v1.0.0`, which never shows draft assets — the draft lives
 under Releases with a Draft badge (publishing stays the owner's click).
 
+### 2026-11-21 12:06 — v1.0.0 PUBLISHED with the Linux assets
+
+Win64 build came up first try (UCRT64, staged DLLs, regression gate green in
+dry run 44902036482). Owner check-in mid-run: publish the Linux assets now,
+amend Windows later — confirmed amended assets on published releases are fine,
+so `gh release edit v1.0.0 --draft=false`. Five assets live (source tarball,
+Linux x86_64 binaries tarball, deb, rpm, SHA256SUMS); win64 zip lands via the
+publish job on the next tag run. decisions.md #4 updated to resolved.
+
+### 2026-11-21 12:08 — win32 verdict: not possible from packaged toolchains
+
+`mingw-w64-i686-fftw` and `mingw-w64-i686-rtl-sdr` are gone from MSYS2's
+mingw32 repo (run 44902315387: "target not found"). The goal said "32-bit if
+possible" — from packaged toolchains it is not. The only route is a from-source
+i686 dependency farm (fftw+libusb+librtlsdr), which is a real maintenance
+burden for a legacy arm → recorded as decisions.md #5 with drop-it as the
+recommendation; the permanently-failing job was removed from the workflow so
+the release flow stays green. Final tag run next: amends the published v1.0.0
+with the win64 zip + refreshed SHA256SUMS.
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,
