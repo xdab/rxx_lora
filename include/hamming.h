@@ -1,6 +1,8 @@
 /**
  * @file hamming.h
  * @brief Soft-decision Hamming decode of one interleaved codeword.
+ *
+ * Reference: [gr-lora_sdr] hamming_dec_impl.cc; hamming_enc_impl.cc:96-115.
  */
 
 #ifndef HAMMING_H
