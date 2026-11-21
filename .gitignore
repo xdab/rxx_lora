@@ -43,5 +43,10 @@ massif.out*
 # Generated API docs
 docs/doxygen/
 
-# Local TODO notes
-TODOS.md
+# Root markdown allowlist: everything else is scratch (agent logs etc.)
+# and stays untracked
+/*.md
+!/AGENTS.md
+!/README.md
+!/TODOS.md
+!/LICENSE.md
