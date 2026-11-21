@@ -9,16 +9,18 @@
 #include <stdint.h>
 
 /**
- * @brief Deinterleave one block's bit LLRs: codeword r's chip i is the
- *        LLR of bit (i + sf_app - r - 1) mod sf_app (MSB-first) of
- *        gray-mapped symbol i.
+ * @brief Reorder one block's bit reliabilities into codeword order.
  *
- * @param[in] sym_llr cw_len symbols' bit LLRs, [i][j] = LLR that bit j
- *                   (MSB first) of gray-mapped symbol i is 1 (from
- *                   demod_soft_llrs); inner stride 12 (max SF)
- * @param[in] cw_len symbols per block: 8 (header) or cr+4 (payload)
- * @param[in] sf_app codewords out: sf-2 (header) or sf (payload)
- * @param[out] cw_out sf_app codewords' chip LLRs, [r][i] MSB-first
+ * The interleaver scatters each Hamming codeword's bits across symbols —
+ * one bit per symbol, at a position that rotates with the codeword index
+ * r — and this undoes that permutation on soft inputs. Inputs and outputs
+ * are log-likelihood ratios (LLRs): positive means the bit is more likely 1.
+ *
+ * @param[in] sym_llr cw_len symbol rows of 12 LLRs each; [i][j] is bit j
+ *                   (MSB first) of symbol i
+ * @param[in] cw_len symbols per block: 8 for the header, cr+4 for payload
+ * @param[in] sf_app codewords out: sf-2 for the header, sf for payload
+ * @param[out] cw_out sf_app codeword rows of cw_len LLRs, [r][i] MSB first
  */
 void deinterleave_soft(
     const float (*sym_llr)[12], uint8_t cw_len, uint8_t sf_app, float (*cw_out)[12]);

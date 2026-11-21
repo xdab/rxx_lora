@@ -10,5 +10,9 @@ void deinterleave_soft(
 {
     for (uint8_t r = 0; r < sf_app; r++)
         for (uint8_t i = 0; i < cw_len; i++)
-            cw_out[r][i] = sym_llr[i][(uint8_t)((i + sf_app - r - 1) % sf_app)];
+        {
+            uint8_t src = (uint8_t)((i + sf_app - r - 1) % sf_app);
+
+            cw_out[r][i] = sym_llr[i][src];
+        }
 }
