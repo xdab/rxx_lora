@@ -1,10 +1,10 @@
 name: Release
 
-# Source tarball releases. A v* tag push builds, gates, and attaches the
-# tarball + checksums to a DRAFT release for that tag (publish manually after
-# review); a workflow_dispatch run is a dry run — assets land under the run
-# summary, never on the Releases page. Re-running a tag run updates that
-# release and clobbers its assets.
+# Release assets. Build jobs run in parallel and upload their outputs as
+# workflow artifacts; the publish job attaches them to a DRAFT release on
+# v* tag pushes (publish manually after review). A workflow_dispatch run is
+# a dry run — nothing ever touches the Releases page. Re-running a tag run
+# updates that release and clobbers its assets.
 #
 # Gotcha: a tag push executes THIS file as it exists in the tagged commit —
 # land workflow changes on main before tagging.
@@ -18,7 +18,9 @@ permissions:
   contents: write
 
 jobs:
-  source-tarball:
+  # Source tarball + gate: build the core binary from the extracted tarball
+  # and run the CI regression arm on it (proves the archive is complete)
+  build-source:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,10 +47,7 @@ jobs:
           git archive --format=tar --prefix="$name/" HEAD | tar -x -C "$d"
           echo "$v" > "$d/$name/VERSION" # release version, self-identifies the tarball
           tar -czf "$name.tar.gz" -C "$d" "$name"
-          sha256sum "$name.tar.gz" > SHA256SUMS
 
-      # Proves the archive is complete and functional: build the core binary
-      # from the extracted tarball and run the CI regression arm on it
       - name: Gate — build + regression from the tarball
         run: |
           sudo apt-get update
@@ -60,22 +59,102 @@ jobs:
           make file
           python3 tools/regression.py --no-capture
 
-      - name: Dry-run assets (workflow_dispatch)
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: release-assets
-          path: |
-            rxx_lora-*.tar.gz
-            SHA256SUMS
+          name: source-assets
+          path: rxx_lora-*.tar.gz
 
-      - name: Attach to a draft release (tag push)
-        if: github.ref_type == 'tag'
+  # Debian package: bookworm container for glibc backward compatibility.
+  # Portable codegen via a CFLAGS command-line override (no -march=native);
+  # the probe-based Makefile stages file_lora + rtl_lora only — rsp_lora
+  # links the proprietary SDRplay API, which no distro packages
+  build-deb:
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - name: Toolchain
+        run: apt-get update && apt-get install -y gcc make git libfftw3-dev librtlsdr-dev python3-numpy
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="$(git describe --tags --always --dirty | sed 's/^v//')"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build + gate
+        run: |
+          make CFLAGS="-O3 -Wall -Wextra -I./include" install DESTDIR="$PWD/stage" PREFIX=/usr
+          python3 tools/regression.py --no-capture
+
+      - name: Stage docs + strip
+        run: |
+          strip --strip-unneeded stage/usr/bin/*
+          install -d stage/usr/share/doc/rxx_lora
+          install -m 644 README.md LICENSE.md stage/usr/share/doc/rxx_lora/
+
+      - name: Package metadata
+        run: |
+          install -d stage/DEBIAN
+          printf '%s\n' \
+            "Package: rxx_lora" \
+            "Version: ${{ steps.ver.outputs.version }}" \
+            "Section: comm" \
+            "Priority: optional" \
+            "Architecture: $(dpkg --print-architecture)" \
+            "Maintainer: xdab <47300315+xdab@users.noreply.github.com>" \
+            "Homepage: https://github.com/xdab/rxx_lora" \
+            "Depends: libfftw3-single3, librtlsdr0" \
+            "Description: LoRa (CSS) receiver for RTL-SDR dongles and SDRplay RSPs" \
+            " A plug-and-play LoRa receiver in the spirit of rtl_fm: SDR in," \
+            " decoded packets out on stdout and JSONL, no GNU Radio." \
+            " ." \
+            " This package ships file_lora (decode I/Q recordings) and rtl_lora" \
+            " (live RTL-SDR reception). rsp_lora needs the proprietary SDRplay" \
+            " API, which is not redistributable; install it from the vendor." \
+            > stage/DEBIAN/control
+
+      - name: dpkg-deb
+        run: |
+          arch="$(dpkg --print-architecture)"
+          dpkg-deb --build --root-owner-group stage "rxx_lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+          # dependency names and file layout resolved against bookworm's index
+          apt-get install -y --dry-run "./rxx_lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-assets
+          path: rxx_lora_*.deb
+
+  # Single owner of the Releases page: fresh SHA256SUMS over every asset,
+  # draft release created if missing, all assets clobbered onto it
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [build-source, build-deb]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-assets"
+          merge-multiple: true
+          path: assets
+
+      - name: Attach to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cd assets
+          sha256sum -- *.tar.gz *.deb > SHA256SUMS
           tag="$GITHUB_REF_NAME"
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --draft --generate-notes \
-                 --title "rxx_lora ${{ steps.ver.outputs.version }}"
-          gh release upload "$tag" rxx_lora-*.tar.gz SHA256SUMS --clobber
+                 --title "rxx_lora ${GITHUB_REF_NAME#v}"
+          gh release upload "$tag" -- *.tar.gz *.deb SHA256SUMS --clobber
