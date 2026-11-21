@@ -25,6 +25,15 @@ after `--` gets glob-matched. Fix: no `--`, flag before files, `shell: bash`
 pinned. Lesson for this runner image (ubuntu26): don't place flags after `--`,
 pin the shell when relying on bash semantics.
 
+### 2026-11-21 11:55 — milestone: source tarball + .deb live on the v1.0.0 draft
+
+Run 44901298139 all green; draft release assets now: `rxx_lora-1.0.0.tar.gz`
+(452 KB), `rxx-lora_1.0.0_amd64.deb` (61 KB, stripped), `SHA256SUMS` over both.
+The deb was validated against bookworm's own index (`apt-get install --dry-run`
+resolves Depends: libfftw3-single3, librtlsdr0). The .deb binaries are built
+with portable CFLAGS (`make CFLAGS=...` command-line override — no Makefile
+change, honoring the workflows-only constraint).
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,

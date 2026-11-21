@@ -64,10 +64,11 @@ jobs:
           name: source-assets
           path: rxx_lora-*.tar.gz
 
-  # Debian package: bookworm container for glibc backward compatibility.
-  # Portable codegen via a CFLAGS command-line override (no -march=native);
-  # the probe-based Makefile stages file_lora + rtl_lora only — rsp_lora
-  # links the proprietary SDRplay API, which no distro packages
+  # Debian package + Linux binary tarball: bookworm container for glibc
+  # backward compatibility. Portable codegen via a CFLAGS command-line
+  # override (no -march=native); the probe-based Makefile stages file_lora +
+  # rtl_lora only — rsp_lora links the proprietary SDRplay API, which no
+  # distro packages
   build-deb:
     runs-on: ubuntu-latest
     container: debian:12
@@ -103,6 +104,22 @@ jobs:
           strip --strip-unneeded stage/usr/bin/*
           install -d stage/usr/share/doc/rxx-lora
           install -m 644 README.md LICENSE.md stage/usr/share/doc/rxx-lora/
+
+      # The stripped portable binaries double as the Linux tarball: same
+      # bookworm build, glibc >= 2.36 floor (see decisions.md #2)
+      - name: Linux binary tarball
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          name="rxx_lora-$v-linux-$(uname -m)"
+          install -d "$name/bin"
+          install -m 755 stage/usr/bin/file_lora stage/usr/bin/rtl_lora "$name/bin/"
+          install -m 644 README.md LICENSE.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bin-assets
+          path: rxx_lora-*-linux-*.tar.gz
 
       - name: Package metadata
         run: |
