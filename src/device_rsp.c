@@ -16,26 +16,23 @@
 #include "logging.h"
 #include "ring.h"
 
-/* The API only offers these output rates: the ADC always runs at 8 MHz and
- * the service decimates by {4, 2, 1}. Requested captures snap up. */
+// API output rates: the ADC runs at 8 MHz, the service decimates by {4, 2, 1};
+// requested captures snap up
 #define RSP_RATE_2M 2000000
 #define RSP_RATE_4M 4000000
 #define RSP_RATE_8M 8000000
 
 #define RSP_RING_SECONDS 2.0
 
-/* Drop the first 300 ms after sdrplay_api_Init: DC-offset calibration
- * transient (zero-IF), far louder than anything decodeable. */
+// drop the post-Init DC-calibration transient (zero-IF, far louder than signal)
 #define RSP_STARTUP_DROP_SECONDS 0.3
 
-/* Manual-gain defaults when only one of -g/-L was given: most IF gain
- * reduction, most LNA gain. Under AGC the API still validates these fields
- * as its starting point, so the same defaults apply. */
+// manual-gain defaults when only one of -g/-L was given (also the API AGC's
+// starting point)
 #define RSP_DEFAULT_GRDB 59
 #define RSP_DEFAULT_LNA_STATE 0
 
-/* Callback conversion scratch; stream dribbles are ~1344 samples, but the
- * API does not bound numSamples by contract, so convert in slices. */
+// conversion scratch; the API does not bound numSamples, so convert in slices
 #define RSP_CONV_SAMPLES 16384
 
 struct rsp_device
@@ -139,11 +136,6 @@ static void rsp_stream_cb(
         }
     }
 
-    s->st.delivered += m;
-
-    double now = mono_seconds();
-    if (now - s->st.report_time >= STREAM_REPORT_SECONDS)
-        stream_report(&s->st, "RSP", STREAM_LOSS_PPM);
     pthread_cond_signal(&s->st.cond);
     pthread_mutex_unlock(&s->st.lock);
 }
@@ -279,6 +271,8 @@ static int rsp_select(struct rsp_device *s, const char *selector)
     long num = strtol(selector, &end, 0);
     if (end != selector && *end == '\0' && num >= 0 && (unsigned long)num < rsp_num_devices)
         idx = (int)num;
+
+    // three passes over the serials: exact match, then prefix, then suffix
     for (int pass = 0; pass < 3 && idx < 0; pass++)
         for (unsigned int i = 0; i < rsp_num_devices && idx < 0; i++)
         {
@@ -422,8 +416,6 @@ struct device *device_open_rsp(
     s->base.ops = &rsp_ops;
     s->rate = rate;
     s->startup_drop = (unsigned long long)(rate * RSP_STARTUP_DROP_SECONDS);
-    s->st.rate = rate;
-    s->st.open_time = s->st.report_time = mono_seconds();
 
     sdrplay_api_CallbackFnsT cb = {0};
     cb.StreamACbFn = rsp_stream_cb;
