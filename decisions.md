@@ -31,14 +31,12 @@ question is linkage:
 Decision needed only if/when users report the bookworm floor is too high;
 builds proceed on the debian:12-dynamic arm meanwhile.
 
-## 3. Version stamping inside binaries (`--version` / usage line)
+## 3. Version stamping inside binaries — DEFERRED by owner 2026-11-21
 
-Binaries currently don't know their version. Proper fix: `-DVERSION` from
-`git describe`/the tarball's `VERSION` file in the Makefile + a line in each
-binary's usage. **Blocked on constraint**: the standing instruction for this
-effort is workflows-only (no code changes). Recorded so the next code-touching
-session picks it up; also the reason shipped deb/rpm binaries can't
-self-identify yet.
+Binaries don't know their version; the proper fix (`-DVERSION` from git
+describe / the tarball's VERSION file in the Makefile + a usage line) is a
+code change. The owner took it off the backlog: "up to the maintainer, that's
+me, to manage." Not planned for agent work unless the owner reopens it.
 
 ## 4. When to publish the draft releases — RESOLVED 2026-11-21
 
@@ -49,25 +47,20 @@ published with the five Linux assets; Windows zips are amended onto it by the
 publish job on the next tag run. For FUTURE tags the draft-first flow
 continues unless the owner says otherwise.
 
-## 5. Windows 32-bit arm — build it at all?
+## 5. Windows 32-bit arm — RESOLVED 2026-11-21: build it
 
-**Blocked fact**: MSYS2's i686 repo no longer packages `mingw-w64-i686-fftw`
-nor `mingw-w64-i686-rtl-sdr` ("target not found", run 44902315387). The
-project's own toolchain path cannot produce a 32-bit build. Remaining options:
+MSYS2's i686 repo no longer packages `mingw-w64-i686-fftw` /
+`mingw-w64-i686-rtl-sdr` ("target not found", run 44902315387). The agent
+recommended dropping 32-bit; the owner overruled: XP/7-era users should not be
+locked out. So the release workflow builds the missing deps from source into
+the i686 toolchain prefix (`--prefix=/mingw32`: FFTW 3.3.10, libusb 1.0.27,
+rtl-sdr from osmocom), then builds the receiver exactly like the 64-bit arm.
+Consequence: the win32 arm carries a from-source dependency build that can
+drift (rtl-sdr tracks osmocom's default branch) — if it breaks, that job fails
+first and should be checked against upstream releases.
 
-- **Drop the 32-bit arm (recommended)** — 64-bit is the primary goal; a 32-bit
-  build would require cross-building FFTW + libusb + librtlsdr from source for
-  i686-mingw (or pinning dead package mirrors), a permanent maintenance burden
-  for a legacy audience. The 32-bit job was removed from the workflow.
-- **From-source i686 dependency farm** — a Linux job cross-compiles the three
-  deps then the receiver; roughly +100 lines of workflow and ongoing upkeep.
+## 6. Minor naming choices — RESOLVED 2026-11-21
 
-Context: goal phrasing was "Windows 32-bit if possible" — it is not, from
-packaged toolchains. Nothing else in the pipeline waits on this.
-
-## 6. Minor naming choices (batch, decide anytime)
-
-- **RPM dist tag**: `Release: 1%{?dist}` yields `1.fc45` (the Fedora release
-  built on). Keep (standard, informative) vs drop (`1.x86_64.rpm`). Also note
-  `fedora:latest` floats — pin a versioned Fedora if the tag must be stable.
-- **Source tarball vs auto snapshots**: see #1.
+- RPM dist tag: keep `1.fc45`-style (`%{?dist}`) and keep `fedora:latest`
+  (owner: "latest is the best").
+- Source tarball vs auto snapshots: see #1 (auto snapshots win).

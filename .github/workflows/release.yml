@@ -286,18 +286,85 @@ jobs:
           name: win64-assets
           path: rxx_lora-*-win64.zip
 
-  # A 32-bit Windows arm is not buildable from packaged toolchains anymore:
-  # MSYS2's i686 repo dropped fftw and rtl-sdr (target not found). Revisit
-  # only if the owner wants a from-source i686 dependency farm — see
-  # decisions.md #5
+  # Windows 32-bit: the MSYS2 i686 repo no longer packages fftw/rtl-sdr
+  # (decisions.md #5), so the three dependencies are built from source into
+  # the toolchain prefix (/mingw32 — the i686 gcc's default search path,
+  # which also lets the Makefile probe find them) before the receiver build.
+  # XP/7-era hosts are the target audience
+  build-win32:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: make git curl autoconf automake libtool pkg-config mingw-w64-i686-gcc
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $v = $env:GITHUB_REF_NAME -replace '^v','' }
+          else { $v = $env:GITHUB_SHA.Substring(0,7) }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      # fftw 3.3.10 + libusb 1.0.27 releases, rtl-sdr tracks osmocom's branch;
+      # --prefix=/mingw32 puts headers/libs/dlls where the i686 gcc looks
+      - name: Build i686 dependencies from source
+        shell: msys2 {0}
+        run: |
+          set -e
+          export PKG_CONFIG_PATH=/mingw32/lib/pkgconfig
+          curl -fsSLO https://www.fftw.org/fftw-3.3.10.tar.gz
+          tar -xf fftw-3.3.10.tar.gz && cd fftw-3.3.10
+          ./configure --enable-float --enable-shared --disable-static --disable-doc --prefix=/mingw32 >/dev/null
+          make -j && make install
+          cd ..
+          curl -fsSLO https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2
+          tar -xf libusb-1.0.27.tar.bz2 && cd libusb-1.0.27
+          ./configure --enable-shared --disable-static --disable-udev --prefix=/mingw32 >/dev/null
+          make -j && make install
+          cd ..
+          git clone --depth 1 https://github.com/osmocom/rtl-sdr.git
+          cd rtl-sdr
+          autoreconf -i >/dev/null
+          ./configure --enable-shared --disable-static --disable-silent-rules --prefix=/mingw32 >/dev/null
+          make -j && make install
+
+      - name: Build + stage DLLs
+        shell: msys2 {0}
+        run: make CFLAGS="-O3 -Wall -Wextra -I./include" file rtl dlls
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          python -m pip install numpy
+          python tools/regression.py --bin bin/file_lora.exe --no-capture
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path "rxx_lora-$v-win32" | Out-Null
+          Copy-Item bin/*.exe,bin/*.dll "rxx_lora-$v-win32/"
+          Copy-Item README.md,LICENSE.md "rxx_lora-$v-win32/"
+          Compress-Archive -Path "rxx_lora-$v-win32" -DestinationPath "rxx_lora-$v-win32.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-assets
+          path: rxx_lora-*-win32.zip
 
   # Single owner of the Releases page: fresh SHA256SUMS over every asset,
-  # draft release created if missing, all assets clobbered onto it.
+  # draft release created if missing, all assets clobbered onto it. Drafts
+  # get no generated notes — the owner writes them before publishing.
   # source-assets is excluded: GitHub auto-generates source archives for the
   # tag, so the custom tarball is gate-only and never published (decisions.md #1)
   publish:
     if: github.ref_type == 'tag'
-    needs: [build-source, build-deb, build-rpm, build-win64]
+    needs: [build-source, build-deb, build-rpm, build-win64, build-win32]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -322,6 +389,6 @@ jobs:
           sha256sum * > SHA256SUMS
           tag="$GITHUB_REF_NAME"
           gh release view "$tag" >/dev/null 2>&1 \
-            || gh release create "$tag" --draft --generate-notes \
+            || gh release create "$tag" --draft \
                  --title "rxx_lora ${GITHUB_REF_NAME#v}"
           gh release upload "$tag" --clobber *
