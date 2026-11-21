@@ -47,17 +47,17 @@ published with the five Linux assets; Windows zips are amended onto it by the
 publish job on the next tag run. For FUTURE tags the draft-first flow
 continues unless the owner says otherwise.
 
-## 5. Windows 32-bit arm — RESOLVED 2026-11-21: build it
+## 5. Windows 32-bit arm — RESOLVED 2026-11-21: dropped, no 32-bit support
 
-MSYS2's i686 repo no longer packages `mingw-w64-i686-fftw` /
-`mingw-w64-i686-rtl-sdr` ("target not found", run 44902315387). The agent
-recommended dropping 32-bit; the owner overruled: XP/7-era users should not be
-locked out. So the release workflow builds the missing deps from source into
-the i686 toolchain prefix (`--prefix=/mingw32`: FFTW 3.3.10, libusb 1.0.27,
-rtl-sdr from osmocom), then builds the receiver exactly like the 64-bit arm.
-Consequence: the win32 arm carries a from-source dependency build that can
-drift (rtl-sdr tracks osmocom's default branch) — if it breaks, that job fails
-first and should be checked against upstream releases.
+Full arc, so nobody re-litigates without the facts: MSYS2's i686 repo no
+longer packages `mingw-w64-i686-fftw`/`mingw-w64-i686-rtl-sdr` (run
+44902315387, "target not found"). The agent recommended dropping 32-bit; the
+owner overruled wanting XP/7-era users served; a from-source dependency farm
+was implemented (FFTW 3.3.10 + libusb 1.0.27 + osmocom rtl-sdr built into
+/mingw32 inside the workflow); it failed its first run, the owner saw the
+trouble and reverted: **no Windows 32-bit support, keep the pipeline clean**.
+If 32-bit demand ever materializes, the farm recipe lives in git history
+(commit `88a3aad`) and the effort is roughly a debugging session away.
 
 ## 6. Minor naming choices — RESOLVED 2026-11-21
 

@@ -91,6 +91,19 @@ Final release shape (v1.0.0, published): deb, rpm, linux-x86_64 tarball,
 win64 zip, SHA256SUMS + GitHub's auto source snapshots. 32-bit Windows: not
 possible from packaged toolchains (decisions.md #5).
 
+### 2026-11-21 12:25 — wrap-up: owner's final rulings
+
+Release notes of the published v1.0.0 replaced with a short hand-written
+summary (the verbose listing was GitHub's `--generate-notes` default; future
+drafts are created without it, so notes are written before publishing).
+decisions.md: #3 version stamping deferred to the maintainer; #6 keep
+`fedora:latest`/`fc45`; #5 win32 — the from-source i686 dependency farm was
+attempted on the owner's request, failed its first run (logs pending when the
+owner intervened), and the owner reverted to **no 32-bit support**; job
+removed, arc recorded with the commit reference for anyone who revisits.
+Final asset set unchanged: deb, rpm, linux-x86_64 tarball, win64 zip,
+SHA256SUMS + auto source snapshots.
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,
