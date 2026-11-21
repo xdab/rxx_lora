@@ -2,13 +2,14 @@
 """Monte Carlo end-to-end BER vs SNR for the C chain (bin/file_lora).
 
 References (in-repo):
-- src/receiver.c — search "RX:": the parsed coded-payload printout
+- src/receiver.c — the stdout JSON frame record (report_frame)
 - tools/frame.py — search "--hex": the binary-payload generator path
 """
 
 import argparse
 import base64
 import concurrent.futures
+import json
 import math
 import os
 import re
@@ -68,11 +69,16 @@ def decode_trial(
     snr_est = float(m.group(1)) if m else None
     if "frame detected" not in cp.stderr:
         return nbits, nbits, "detect", False, None
-    m = re.search(r"RX: ([A-Za-z0-9+/=]*)", cp.stderr)
-    if m is None:
+
+    # the frame record is one JSON line on stdout (receiver.c report_frame);
+    # its absence means SYNC never accepted the sync word
+    rec = next(
+        (json.loads(line) for line in cp.stdout.splitlines() if line.startswith('{"packet"')), None
+    )
+    if rec is None:
         return nbits, nbits, "sync", False, snr_est
-    got = base64.b64decode(m.group(1))
-    crc_ok = "CRC valid!" in cp.stderr or "CRC absent" in cp.stderr
+    got = base64.b64decode(rec["packet"])
+    crc_ok = rec["crc_valid"] is not False
     return bit_errs_bytes(truth, got), nbits, "decode", crc_ok, snr_est
 
 
@@ -152,8 +158,8 @@ def main() -> None:
             "then hands the file to the shipped binary — exactly as a human "
             "would.\n"
             "The score is end-to-end information BER over the dewhitened "
-            "payload bytes, read byte-exactly from the receiver's 'RX:' line "
-            "with the CRC verdict beside it (PER = lost frames); a lost frame "
+            "payload bytes, read byte-exactly from the receiver's stdout JSON "
+            "record with the CRC verdict beside it (PER = lost frames); a lost frame "
             "counts every payload bit wrong.\n"
             "Zero-power leading zeros (--sto-max) dilute awgn's file-average "
             "power estimate by up to ~0.3 dB — an accepted bias."
