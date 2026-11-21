@@ -151,8 +151,10 @@ jobs:
           path: assets
 
       - name: Attach to the draft release
+        # GH_REPO: the publish job has no checkout, gh can't infer the repo
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           cd assets
           sha256sum -- *.tar.gz *.deb > SHA256SUMS
