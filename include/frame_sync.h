@@ -3,6 +3,8 @@
  * @brief LoRa frame synchronization: DETECT > SYNC > corrected payload
  *        windows. The state is opaque; the caller drives the state machine
  *        with the step functions and reads results through the snapshot.
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:108; [gr-lora] demod_impl.cc:109.
  */
 
 #ifndef FRAME_SYNC_H
@@ -63,7 +65,8 @@ struct frame_sync_status
  *            DETECT windows before the bin decision (1 = off, values < 1 treated as 1)
  * @return the state, or NULL on allocation failure (stderr printed)
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:25; [gr-lora] demod_impl.cc:54.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
+ * [gr-lora] demod_impl.cc:54.
  */
 struct frame_sync *frame_sync_create(
     uint8_t spreading_factor,

@@ -1,9 +1,3 @@
-/*
- * Frame-sync state lifecycle and the shared dechirp-FFT kernel; line
- * references point at [gr-lora_sdr] frame_sync_impl.cc. The
- * DETECT state lives in detect.c, SYNC/SFO_COMPENSATION in sync.c.
- */
-
 #include "frame_sync.h"
 #include "dsp.h"
 #include "frame_sync_internal.h"
@@ -21,8 +15,6 @@
 
 static void frame_sync_cleanup(struct frame_sync *s);
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
-// [gr-lora] demod_impl.cc:54
 struct frame_sync *frame_sync_create(
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors the reference's constructor
     uint8_t spreading_factor,
@@ -119,7 +111,6 @@ out:
     return s;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:108; [gr-lora] demod_impl.cc:109
 static void frame_sync_cleanup(struct frame_sync *s)
 {
     free(s->preamb_up_vals);
@@ -167,11 +158,11 @@ void frame_sync_destroy(struct frame_sync *s)
     free(s);
 }
 
-/* Reference: [gr-lora_sdr] frame_sync_impl.cc:874-880,404-411. The reference
- * re-arms its DETECT fields alone; this port also clears the one-shot
- * cfo_est_done and the DETECT averaging ring, kept across frames — left set,
- * the next frame's SYNC would reuse the previous frame's CFO, and its first
- * detect windows would average in the finished frame's spectra. */
+/* Deviation: the reference re-arms its DETECT fields alone; this port also
+ * clears the one-shot cfo_est_done and the DETECT averaging ring, kept
+ * across frames — left set, the next frame's SYNC would reuse the previous
+ * frame's CFO, and its first detect windows would average in the finished
+ * frame's spectra. */
 void frame_sync_reset_detect(struct frame_sync *s)
 {
     s->phase = FS_DETECT;
@@ -273,7 +264,6 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
     };
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:499-501
 void frame_sync_downsample_prologue(
     struct frame_sync *s, const float complex *in, float complex *dst)
 {
@@ -297,7 +287,6 @@ void frame_sync_downsample_prologue(
         s->samples_per_symbol);
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:322; [gr-lora] demod_impl.cc:199-206
 int frame_sync_get_symbol_val(
     struct frame_sync *s, const float complex *samples, const float complex *ref_chirp)
 {
