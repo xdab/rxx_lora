@@ -152,14 +152,17 @@ jobs:
 
       - name: Attach to the draft release
         # GH_REPO: the publish job has no checkout, gh can't infer the repo
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           cd assets
-          sha256sum -- *.tar.gz *.deb > SHA256SUMS
+          # glob expands before the redirect creates the file, so the
+          # checksum file never hashes itself
+          sha256sum * > SHA256SUMS
           tag="$GITHUB_REF_NAME"
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --draft --generate-notes \
                  --title "rxx_lora ${GITHUB_REF_NAME#v}"
-          gh release upload "$tag" -- *.tar.gz *.deb SHA256SUMS --clobber
+          gh release upload "$tag" --clobber *
