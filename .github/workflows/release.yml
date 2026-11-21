@@ -82,11 +82,14 @@ jobs:
 
       - name: Version
         id: ver
+        # container jobs run sh and git refuses the runner-owned checkout, so
+        # no describe here: the tag names the release; a dry run uses the SHA
+        shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             v="${GITHUB_REF_NAME#v}"
           else
-            v="$(git describe --tags --always --dirty | sed 's/^v//')"
+            v="${GITHUB_SHA:0:7}"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
