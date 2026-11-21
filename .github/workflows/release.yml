@@ -193,6 +193,7 @@ jobs:
           # the SONAME dependencies itself
           for d in BUILD RPMS SOURCES SPECS SRPMS; do mkdir -p rpmbuild/$d; done
           install -m 755 bin/file_lora bin/rtl_lora rpmbuild/SOURCES/
+          install -m 644 README.md LICENSE.md rpmbuild/SOURCES/
           printf '%s\n' \
             "Name:           rxx-lora" \
             "Version:        $v" \
@@ -221,6 +222,10 @@ jobs:
             "%{_bindir}/file_lora" \
             "%{_bindir}/rtl_lora" \
             "%{_docdir}/%{name}" \
+            "" \
+            "%changelog" \
+            "* Sat Nov 21 2026 xdab <47300315+xdab@users.noreply.github.com> - $v-1" \
+            "- Release $v; see the release notes for changes." \
             > rpmbuild/SPECS/rxx-lora.spec
           rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/rxx-lora.spec
           mv rpmbuild/RPMS/*/*.rpm .
