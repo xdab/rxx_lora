@@ -284,11 +284,58 @@ jobs:
           name: win64-assets
           path: rxx_lora-*-win64.zip
 
+  # Windows 32-bit: best effort (goal says "if possible"). Same recipe as
+  # win64 on the MINGW32/i686 toolchain; continue-on-error keeps the rest of
+  # the release flowing when the i686 arm breaks
+  build-win32:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: make mingw-w64-i686-gcc mingw-w64-i686-fftw mingw-w64-i686-rtl-sdr
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $v = $env:GITHUB_REF_NAME -replace '^v','' }
+          else { $v = $env:GITHUB_SHA.Substring(0,7) }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build + stage DLLs
+        shell: msys2 {0}
+        run: make CFLAGS="-O3 -Wall -Wextra -I./include" file rtl dlls
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          python -m pip install numpy
+          python tools/regression.py --bin bin/file_lora.exe --no-capture
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path "rxx_lora-$v-win32" | Out-Null
+          Copy-Item bin/*.exe,bin/*.dll "rxx_lora-$v-win32/"
+          Copy-Item README.md,LICENSE.md "rxx_lora-$v-win32/"
+          Compress-Archive -Path "rxx_lora-$v-win32" -DestinationPath "rxx_lora-$v-win32.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-assets
+          path: rxx_lora-*-win32.zip
+
   # Single owner of the Releases page: fresh SHA256SUMS over every asset,
   # draft release created if missing, all assets clobbered onto it
   publish:
     if: github.ref_type == 'tag'
-    needs: [build-source, build-deb, build-rpm, build-win64]
+    needs: [build-source, build-deb, build-rpm, build-win64, build-win32]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
