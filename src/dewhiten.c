@@ -22,10 +22,14 @@ static const uint8_t whitening_seq[255] = {
     0xE5, 0xCA, 0x94, 0x28, 0x50, 0xA1, 0x42, 0x84, 0x09, 0x13, 0x27, 0x4F, 0x9F, 0x3F, 0x7F,
 };
 
-// Reference: [gr-lora_sdr] dewhitening_impl.cc:96-98
 void dewhiten(const uint8_t *nibs, uint8_t n, uint8_t *out)
 {
     for (uint8_t i = 0; i < n; i++)
-        out[i] = (uint8_t)(((nibs[2 * (size_t)i + 1] ^ (whitening_seq[i] >> 4)) << 4) |
-                           (nibs[2 * (size_t)i] ^ (whitening_seq[i] & 0x0F)));
+    {
+        uint8_t seq = whitening_seq[i];
+        uint8_t lo = (uint8_t)(nibs[2 * (size_t)i] ^ (seq & 0x0F));
+        uint8_t hi = (uint8_t)(nibs[2 * (size_t)i + 1] ^ (seq >> 4));
+
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
 }
