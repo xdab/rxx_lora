@@ -43,7 +43,7 @@ static void usage(void)
                  "\t[--input-rate HZ] sample rate of FILE; the file is resampled\n"
                  "\t         to bw*os before decoding; omit when the\n"
                  "\t         capture is already at bw*os\n"
-                 "\t         (HZ values take k/m/g suffixes: 868.1m = 868.1 MHz)\n"
+                 "\t         (HZ values take k/M/G suffixes: 868.1M = 868.1 MHz)\n"
                  "\n"
                  "Example:\t" APP_NAME " -w 0x2b --center-freq 868.1e6 --bw 125e3 frame.cf32\n"
                  "\n");

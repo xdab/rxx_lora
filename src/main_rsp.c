@@ -48,7 +48,7 @@ static void usage(void)
                  "\t         rate bw*os and the default capture rate\n"
                  "\t[--input-rate HZ] RSP capture rate (default: bw*os); snapped to\n"
                  "\t         the API's 2/4/8 MS/s\n"
-                 "\t         (HZ values take k/m/g suffixes: 869.525m = 869.525 MHz)\n"
+                 "\t         (HZ values take k/M/G suffixes: 869.525M = 869.525 MHz)\n"
                  "\n"
                  "Example:\t" APP_NAME " --center-freq 869.525e6 -s 9 -w 0x2b\n"
                  "\n");

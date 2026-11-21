@@ -52,9 +52,10 @@ static inline double parse_duration(const char *s)
     return -1.0;
 }
 
-// Hz from a decimal with an optional k/m/g suffix (kHz, MHz, GHz), the way
-// rtl_fm takes frequencies; -1 on a malformed value (a bare number is
-// already Hz).
+// Hz from a decimal with an optional SI suffix — k (kilo, customarily
+// lowercase), M, G; both cases are accepted, and for frequencies the milli
+// reading of a bare m is never intended. A bare number is already Hz; -1 on
+// a malformed value.
 static inline double parse_hz(const char *s)
 {
     char *end;
