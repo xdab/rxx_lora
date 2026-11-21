@@ -302,9 +302,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: |
-            *-assets
-            !source-assets
+          pattern: "*-assets"
           merge-multiple: true
           path: assets
 
@@ -316,6 +314,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd assets
+          # the custom source archive is gate-only — GitHub's auto snapshots
+          # are the canonical source download (decisions.md #1)
+          rm -f "rxx_lora-${GITHUB_REF_NAME#v}.tar.gz"
           # glob expands before the redirect creates the file, so the
           # checksum file never hashes itself
           sha256sum * > SHA256SUMS
