@@ -9,7 +9,11 @@
 
 #include <stdint.h>
 
-// Decoded PHY header fields (header_decoder_impl.cc:133-136).
+/**
+ * Decoded PHY header fields.
+ *
+ * Reference: [gr-lora_sdr] header_decoder_impl.cc:133-136.
+ */
 struct lora_header
 {
     uint8_t pay_len; // payload length in bytes

@@ -1,12 +1,20 @@
+/**
+ * @file receiver.h
+ * @brief The generic receive chain: DETECT -> coarse sync -> SYNC -> payload,
+ *        over and over, for every frame the source can supply. Backend- and
+ *        input-agnostic; it only ever asks the source for windows.
+ *
+ * Reference: [gr-lora_sdr] lora_RX.grc:735-741; [gr-lora] decode_impl.cc:421.
+ */
+
 #ifndef RECEIVER_H
 #define RECEIVER_H
 
 struct source;
 
 /**
- * The generic receive chain: DETECT -> coarse sync -> SYNC -> payload, over
- * and over, for every frame the source can supply. Backend- and
- * input-agnostic; it only ever asks the source for windows.
+ * One instance of the receive chain: the frame-sync state, the demodulator,
+ * and the chase/report configuration.
  */
 struct receiver;
 

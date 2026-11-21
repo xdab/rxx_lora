@@ -1,9 +1,3 @@
-/*
- * Frame-sync state lifecycle and the shared dechirp-FFT kernel; line
- * references point at [gr-lora_sdr] frame_sync_impl.cc. The
- * DETECT state lives in detect.c, SYNC/SFO_COMPENSATION in sync.c.
- */
-
 #include "frame_sync.h"
 #include "dsp.h"
 #include "frame_sync_internal.h"
@@ -13,7 +7,6 @@
 #include <complex.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,8 +14,6 @@
 
 static void frame_sync_cleanup(struct frame_sync *s);
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
-// [gr-lora] demod_impl.cc:54
 struct frame_sync *frame_sync_create(
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors the reference's constructor
     uint8_t spreading_factor,
@@ -54,57 +45,40 @@ struct frame_sync *frame_sync_create(
     s->sto_frac = 0.0f;
 
     int ret = -1;
-// Allocate a working buffer; a failure jumps straight to the cleanup, which
-// frees every slot (all pointers start NULL from the calloc above).
-#define FS_ALLOC(field, count)                                                                     \
-    do                                                                                             \
-    {                                                                                              \
-        s->field = malloc((size_t)(count) * sizeof(*s->field));                                    \
-        if (!s->field)                                                                             \
-        {                                                                                          \
-            log_error("frame_sync_create: out of memory\n");                                       \
-            goto out;                                                                              \
-        }                                                                                          \
-    } while (0)
 
-    FS_ALLOC(preamb_up_vals, s->n_up_req);
-    FS_ALLOC(mode_hash, s->number_of_bins);
-    FS_ALLOC(upchirp, s->number_of_bins);
-    FS_ALLOC(downchirp, s->number_of_bins);
-    FS_ALLOC(in_down, s->number_of_bins);
-    FS_ALLOC(out_win, s->number_of_bins);
-    FS_ALLOC(preamble_raw, preamble_len * s->number_of_bins);
-    FS_ALLOC(net_id_samp, 2.5 * s->samples_per_symbol);
-    FS_ALLOC(cfo_correc_long, (s->n_up_req + 3) * s->number_of_bins);
-    FS_ALLOC(sfo_corr_vect, (s->n_up_req + 3) * s->number_of_bins);
-    FS_ALLOC(net_ids_samp_dec, 2 * s->number_of_bins);
-    FS_ALLOC(rot_tmp, s->samples_per_symbol);
-    FS_ALLOC(preamble_upchirps, preamble_len * s->number_of_bins);
-    FS_ALLOC(cfo_correc, s->number_of_bins);
-    FS_ALLOC(symb_corr, s->number_of_bins);
-    FS_ALLOC(est_dechirped, s->number_of_bins);
-    FS_ALLOC(est_cx_in, 2 * s->number_of_bins);
-    FS_ALLOC(est_cx_out, 2 * s->number_of_bins);
-    FS_ALLOC(est_fft_mag, 2 * s->number_of_bins);
-    FS_ALLOC(est_fft_val, s->n_up_req * s->number_of_bins);
-    FS_ALLOC(est_k0, s->n_up_req);
-    FS_ALLOC(est_k0_mag, s->n_up_req);
-    FS_ALLOC(cx_in, s->number_of_bins);
-    FS_ALLOC(cx_out, s->number_of_bins);
-    FS_ALLOC(fft_mag, s->number_of_bins);
-    FS_ALLOC(detect_score, 2 * s->number_of_bins + 2);
-    FS_ALLOC(netid_mask, s->number_of_bins);
+    SAFE_ALLOC(s->preamb_up_vals, s->n_up_req, "frame_sync_create");
+    SAFE_ALLOC(s->mode_hash, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->upchirp, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->downchirp, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->in_down, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->out_win, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->preamble_raw, preamble_len * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->net_id_samp, 2.5 * s->samples_per_symbol, "frame_sync_create");
+    SAFE_ALLOC(s->cfo_correc_long, (s->n_up_req + 3) * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->sfo_corr_vect, (s->n_up_req + 3) * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->net_ids_samp_dec, 2 * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->rot_tmp, s->samples_per_symbol, "frame_sync_create");
+    SAFE_ALLOC(s->preamble_upchirps, preamble_len * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->cfo_correc, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->symb_corr, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_dechirped, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_cx_in, 2 * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_cx_out, 2 * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_fft_mag, 2 * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_fft_val, s->n_up_req * s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->est_k0, s->n_up_req, "frame_sync_create");
+    SAFE_ALLOC(s->est_k0_mag, s->n_up_req, "frame_sync_create");
+    SAFE_ALLOC(s->cx_in, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->cx_out, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->fft_mag, s->number_of_bins, "frame_sync_create");
+    SAFE_ALLOC(s->detect_score, 2 * s->number_of_bins + 2, "frame_sync_create");
+    SAFE_ALLOC(s->netid_mask, s->number_of_bins, "frame_sync_create");
     if (s->detect_avg > 1)
     {
-        FS_ALLOC(detect_mag_hist, s->detect_avg * s->number_of_bins);
-        s->detect_mag_sum = calloc(s->number_of_bins, sizeof(*s->detect_mag_sum));
-        if (!s->detect_mag_sum)
-        {
-            log_error("frame_sync_create: out of memory\n");
-            goto out;
-        }
+        SAFE_ALLOC(s->detect_mag_hist, s->detect_avg * s->number_of_bins, "frame_sync_create");
+        SAFE_CALLOC(s->detect_mag_sum, s->number_of_bins, "frame_sync_create");
     }
-#undef FS_ALLOC
+
     memset(s->preamb_up_vals, 0, s->n_up_req * sizeof(*s->preamb_up_vals));
     util_build_ref_chirps(s->upchirp, s->downchirp, spreading_factor);
 
@@ -136,7 +110,6 @@ out:
     return s;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:108; [gr-lora] demod_impl.cc:109
 static void frame_sync_cleanup(struct frame_sync *s)
 {
     free(s->preamb_up_vals);
@@ -184,11 +157,11 @@ void frame_sync_destroy(struct frame_sync *s)
     free(s);
 }
 
-/* Reference: [gr-lora_sdr] frame_sync_impl.cc:874-880,404-411. The reference
- * re-arms its DETECT fields alone; this port also clears the one-shot
- * cfo_est_done and the DETECT averaging ring, kept across frames — left set,
- * the next frame's SYNC would reuse the previous frame's CFO, and its first
- * detect windows would average in the finished frame's spectra. */
+/* Deviation: the reference re-arms its DETECT fields alone; this port also
+ * clears the one-shot cfo_est_done and the DETECT averaging ring, kept
+ * across frames — left set, the next frame's SYNC would reuse the previous
+ * frame's CFO, and its first detect windows would average in the finished
+ * frame's spectra. */
 void frame_sync_reset_detect(struct frame_sync *s)
 {
     s->phase = FS_DETECT;
@@ -290,7 +263,6 @@ void frame_sync_status(const struct frame_sync *s, struct frame_sync_status *st)
     };
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:499-501
 void frame_sync_downsample_prologue(
     struct frame_sync *s, const float complex *in, float complex *dst)
 {
@@ -314,7 +286,6 @@ void frame_sync_downsample_prologue(
         s->samples_per_symbol);
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:322; [gr-lora] demod_impl.cc:199-206
 int frame_sync_get_symbol_val(
     struct frame_sync *s, const float complex *samples, const float complex *ref_chirp)
 {

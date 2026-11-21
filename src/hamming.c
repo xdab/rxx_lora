@@ -1,15 +1,9 @@
-/*
- * Hamming decode of the coding chain; line references point at
- * [gr-lora_sdr] hamming_dec_impl.cc.
- */
-
 #include "hamming.h"
 #include <stdint.h>
 
 // bit k (MSB first) of a cw_len-bit codeword
 #define CODEWORD_BIT(v, k, cw_len) (((v) >> ((cw_len) - 1 - (k))) & 1u)
 
-// Reference: [gr-lora_sdr] hamming_enc_impl.cc:96-115
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) // mirrors [gr-lora_sdr]
 static uint8_t hamming_encode_nibble(uint8_t nib, uint8_t cr)
 {

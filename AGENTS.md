@@ -76,6 +76,9 @@ cross-check os/sf/bw whenever they meet.
 - no pointless duplication - if some fact can be read off a `--help` or an `ls`, leave it out.
 - every in-repo reference must resolve correctly: file exists, line or search string is in it, description is accurate;
 - material is scoped to the appropriate location, e.g. subdirectory details live in their READMEs.
+- documentation lives in headers, not sources - keep `src/*.c` clean of doc comment blocks; any comment a source keeps states only what the code cannot show at a glance, no justification prose;
+- external reference pointers (`[gr-lora_sdr]`, `[gr-lora]`, …) live only in header docs, never in sources; where the two disagreed, the fuller line list won;
+- docstrings are concept-first: introduce their terms, say what the function does to its actual buffers and parameters - not the pipeline that calls it, and not details readable from the source.
 
 ## Constraints
 

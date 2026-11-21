@@ -237,29 +237,27 @@ int sfd_alloc(struct frame_sync *s)
     while (f->lock_len < 4u * (uint32_t)s->n_up_req * n)
         f->lock_len <<= 1;
 
-    f->slot = malloc(n * sizeof(*f->slot));
-    f->lockmag = malloc(f->lock_len * sizeof(*f->lockmag));
-    f->mag = malloc(4 * (size_t)n * sizeof(*f->mag));
-    f->dpair = malloc((size_t)SFD_DPAIR * 4 * n * sizeof(*f->dpair));
-    f->coarse_dec = malloc((size_t)SFD_U_SLOTS * n * sizeof(*f->coarse_dec));
-    f->dsum = malloc(4 * (size_t)n * sizeof(*f->dsum));
-    f->med = malloc(4 * (size_t)n * sizeof(*f->med));
-    f->fine_dec = malloc((size_t)SFD_FINE_DEC * n * sizeof(*f->fine_dec));
-    f->fine_dn = malloc((size_t)SFD_FINE_DN * 4 * n * sizeof(*f->fine_dn));
-    f->fine_up = malloc((size_t)SFD_FINE_UP * 4 * n * sizeof(*f->fine_up));
-    f->cx_in = malloc(f->lock_len * sizeof(*f->cx_in));
-    f->cx_out = malloc(f->lock_len * sizeof(*f->cx_out));
-    f->coh_in = malloc((size_t)SFD_COH_LEN * n * sizeof(*f->coh_in));
-    f->coh_out = malloc((size_t)SFD_COH_LEN * n * sizeof(*f->coh_out));
+    SAFE_ALLOC(f->slot, n, "sfd_alloc");
+    SAFE_ALLOC(f->lockmag, f->lock_len, "sfd_alloc");
+    SAFE_ALLOC(f->mag, 4 * (size_t)n, "sfd_alloc");
+    SAFE_ALLOC(f->dpair, (size_t)SFD_DPAIR * 4 * n, "sfd_alloc");
+    SAFE_ALLOC(f->coarse_dec, (size_t)SFD_U_SLOTS * n, "sfd_alloc");
+    SAFE_ALLOC(f->dsum, 4 * (size_t)n, "sfd_alloc");
+    SAFE_ALLOC(f->med, 4 * (size_t)n, "sfd_alloc");
+    SAFE_ALLOC(f->fine_dec, (size_t)SFD_FINE_DEC * n, "sfd_alloc");
+    SAFE_ALLOC(f->fine_dn, (size_t)SFD_FINE_DN * 4 * n, "sfd_alloc");
+    SAFE_ALLOC(f->fine_up, (size_t)SFD_FINE_UP * 4 * n, "sfd_alloc");
+    SAFE_ALLOC(f->cx_in, f->lock_len, "sfd_alloc");
+    SAFE_ALLOC(f->cx_out, f->lock_len, "sfd_alloc");
+    SAFE_ALLOC(f->coh_in, (size_t)SFD_COH_LEN * n, "sfd_alloc");
+    SAFE_ALLOC(f->coh_out, (size_t)SFD_COH_LEN * n, "sfd_alloc");
     f->slot_fft_cfg = dsp_fft_alloc(4 * (int)n);
     f->lock_fft_cfg = dsp_fft_alloc((int)f->lock_len);
     f->coh_fft_cfg = dsp_fft_alloc((int)(SFD_COH_LEN * n));
-    if (!f->slot || !f->lockmag || !f->mag || !f->dpair || !f->coarse_dec || !f->dsum || !f->med ||
-        !f->fine_dec || !f->fine_dn || !f->fine_up || !f->cx_in || !f->cx_out || !f->coh_in ||
-        !f->coh_out || !f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
+    if (!f->slot_fft_cfg || !f->lock_fft_cfg || !f->coh_fft_cfg)
     {
-        sfd_free(s);
-        return -1;
+        log_error("sfd_alloc: dsp_fft_alloc failed\n");
+        goto out;
     }
 
     // firwin(65, 1/os, hamming)-class design; the passband must cover the
@@ -285,15 +283,14 @@ int sfd_alloc(struct frame_sync *s)
     // (one symbol of os-strided taps + the pad)
     memcpy(f->fir_v, f->fir, f->fir_n * sizeof(*f->fir));
     memset(f->fir_v + f->fir_n, 0, (SFD_FIR_PAD - f->fir_n) * sizeof(*f->fir_v));
-    f->st_re = malloc((s->samples_per_symbol + SFD_FIR_PAD) * sizeof(*f->st_re));
-    f->st_im = malloc((s->samples_per_symbol + SFD_FIR_PAD) * sizeof(*f->st_im));
-    if (!f->st_re || !f->st_im)
-    {
-        sfd_free(s);
-        return -1;
-    }
+    SAFE_ALLOC(f->st_re, s->samples_per_symbol + SFD_FIR_PAD, "sfd_alloc");
+    SAFE_ALLOC(f->st_im, s->samples_per_symbol + SFD_FIR_PAD, "sfd_alloc");
 
     return 0;
+
+out:
+    sfd_free(s);
+    return -1;
 }
 
 void sfd_free(struct frame_sync *s)
@@ -467,13 +464,11 @@ static int sfd_coarse(
     const uint32_t n4 = 4u * n;
     const int64_t sps = (int64_t)s->samples_per_symbol;
 
-    /* Lock on the certified run: the n_up_req agreeing windows ending at the
-     * fire are upchirps by construction. */
+    // lock on the certified run: the n_up_req agreeing windows are upchirps
     *u_hat = sfd_lock(s, in, -(int64_t)(s->n_up_req - 1) * sps, s->n_up_req);
 
-    /* Change point over candidate SFD starts q windows past the fire:
-     * known-bin power at u, plus the candidate's two windows dechirped by
-     * the upchirp (downchirp evidence). */
+    // change point over candidate SFD starts q windows past the fire:
+    // known-bin power at u plus the pair's upchirp-dechirped evidence
     float upow[SFD_U_SLOTS]; // slot offsets -4..9, index o + 4
     // decimate the covered offsets once; the down-ref rows (upow) and the
     // pair slots' up-ref rows (dpair) share the decimations
@@ -485,8 +480,7 @@ static int sfd_coarse(
         upow[o + 4] = sfd_bin_pow(s->sfd.mag, n, *u_hat);
     }
 
-    /* Pair-slot spectra computed once: each interior slot feeds two q
-     * hypotheses (as q of one and q+1 of the previous). */
+    // pair-slot spectra once: each interior slot feeds two q hypotheses
     for (int sl = 0; sl < SFD_DPAIR; sl++)
         sfd_slot_ref_fft(
             s,
@@ -550,10 +544,8 @@ static int sfd_fine(
         int64_t t_cand = (int64_t)q_hat * sps - (int64_t)lroundf(taus[it] * (float)os);
         float u_r = sfd_lock(s, in, t_cand - 8 * sps, 6);
 
-        // decimate each slot the fine pass reads (offsets -5..2: shifts
-        // +-3 need slots shift-2..shift+1; the SFD-start sigma2 row is slot
-        // 0); the down-ref FFTs (net-id terms, rows = slot + 5) and the
-        // up-ref sigma2 FFT share the decimation
+        // decimate each slot the fine pass reads (offsets -5..2); the
+        // down-ref rows and the up-ref sigma2 FFT share the decimation
         for (int j = -5; j <= 2; j++)
             sfd_slot_dec(s, in, t_cand + (int64_t)j * sps, s->sfd.fine_dec + (size_t)(j + 5) * n);
         for (int j = -5; j <= 2; j++)
@@ -565,8 +557,7 @@ static int sfd_fine(
         sfd_slot_ref_fft(s, s->sfd.fine_dec + (size_t)5 * n, s->upchirp, s->sfd.fine_up);
 
         // one noise floor per representative, shared by every shift — lam
-        // must stay comparable across hypotheses. Zero means the slot sits
-        // in the stream's zero padding: nothing to score
+        // stays comparable; zero means the slot sits in the zero padding
         float med = sfd_median_power(s->sfd.med, s->sfd.fine_up, n4);
         if (med <= 1e-12f)
             continue;

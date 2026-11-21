@@ -114,13 +114,13 @@ static inline int live_opt(int opt, struct live_opts *o)
         o->dc_block = 1;
         return 1;
     case OPT_CENTER_FREQ:
-        o->center_freq = strtod(optarg, NULL);
+        o->center_freq = parse_hz(optarg);
         return 1;
     case OPT_BW:
-        o->bandwidth = strtod(optarg, NULL);
+        o->bandwidth = parse_hz(optarg);
         return 1;
     case OPT_INPUT_RATE:
-        o->capture_rate = strtod(optarg, NULL);
+        o->capture_rate = parse_hz(optarg);
         return 1;
     default:
         return 0;

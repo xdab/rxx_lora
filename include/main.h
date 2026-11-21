@@ -29,7 +29,10 @@ static inline void log_verbosity_opt(int opt, int argc, char **argv)
         n = (int)strtol(argv[optind++], NULL, 10);
     if (n < 1)
         n = 1;
-    log_set_level(opt == 'v' ? LOG_INFO - (n > 2 ? 2 : n) : LOG_INFO + (n > 3 ? 3 : n));
+    if (opt == 'v')
+        log_set_level(LOG_INFO - (n > 2 ? 2 : n));
+    else
+        log_set_level(LOG_INFO + (n > 3 ? 3 : n));
 }
 
 // seconds from a decimal with an optional s/m/h suffix; -1 on a malformed
@@ -46,6 +49,27 @@ static inline double parse_duration(const char *s)
         return v * 60.0;
     if ((*end == 'h' || *end == 'H') && end[1] == '\0')
         return v * 3600.0;
+    return -1.0;
+}
+
+// Hz from a decimal with an optional SI suffix — k (kilo, customarily
+// lowercase), M, G; both cases are accepted, and for frequencies the milli
+// reading of a bare m is never intended. A bare number is already Hz; -1 on
+// a malformed value.
+static inline double parse_hz(const char *s)
+{
+    char *end;
+    double v = strtod(s, &end);
+    if (end == s || v < 0.0)
+        return -1.0;
+    if (*end == '\0')
+        return v;
+    if ((*end == 'k' || *end == 'K') && end[1] == '\0')
+        return v * 1e3;
+    if ((*end == 'm' || *end == 'M') && end[1] == '\0')
+        return v * 1e6;
+    if ((*end == 'g' || *end == 'G') && end[1] == '\0')
+        return v * 1e9;
     return -1.0;
 }
 

@@ -1,9 +1,3 @@
-/*
- * SYNC and SFO_COMPENSATION states of the frame-sync stage; state and the
- * shared dechirp-FFT kernel live in frame_sync.c, preamble hunting in
- * detect.c.
- */
-
 #include "dsp.h"
 #include "frame_sync.h"
 #include "frame_sync_internal.h"
@@ -19,8 +13,7 @@
 
 #include "volk.h"
 
-// port-side: exact-refresh period (power of two) for the float phasor
-// recurrences below; bounds the running-multiply |z|=1 drift to ~3e-5.
+// exact-refresh period for the float phasor recurrences below
 #define PHASOR_RESYNC 512
 
 /* Phasor e^{i2pi*rate/n * j} over len entries, restarted exactly every
@@ -49,8 +42,7 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
 
     for (int i = 0; i < ust; i++)
     {
-        // volk_32fc_x2_multiply_32fc, fused with the pack into the FFT input
-        // (dsp_cpx is layout-identical to lv_32fc_t)
+        // fused multiply+pack: dsp_cpx is layout-identical to lv_32fc_t
         volk_32fc_x2_multiply_32fc(
             (lv_32fc_t *)(void *)s->est_cx_in, samples + (size_t)n * i, s->downchirp, n);
 
@@ -87,7 +79,6 @@ float frame_sync_estimate_cfo_frac_bernier(struct frame_sync *s, const float com
     return cfo_frac;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:254
 static float estimate_sto_frac(struct frame_sync *s)
 {
     const uint32_t n = s->number_of_bins;
@@ -128,7 +119,6 @@ static float estimate_sto_frac(struct frame_sync *s)
     return sto_frac;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:573,625,667
 static void rotate_left(struct frame_sync *s, float complex *v, uint32_t len, uint32_t r)
 {
     if (r == 0)
@@ -188,20 +178,16 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     for (uint32_t j = 0; j < (uint32_t)(s->n_up_req - 1) * n; j++)
         s->preamble_upchirps[j] *= s->cfo_correc_long[j];
 
-    /* SFO estimate from the CFO: one crystal drives both the tuner LO and
-     * the ADC, so a fractional carrier error eps implies a fractional
-     * clock error eps, and sfo_hat = cfo*BW/f_center is that clock error
-     * in chips/symbol. gr-lora_sdr infers it unconditionally
-     * (frame_sync_impl.cc:638); the default-off guard is a deliberate
-     * deviation, the reference assumes the coupling even where it cannot
-     * hold. */
+    /* SFO from the CFO: one crystal drives both the tuner LO and the ADC,
+     * so sfo_hat = cfo*BW/f_center is the clock error in chips/symbol.
+     * center_freq == 0 disables the inference (the reference never guards
+     * it — a deviation). */
     s->sfo_hat =
         (s->center_freq != 0) ? (s->cfo * (float)s->bandwidth) / (float)s->center_freq : 0.0f;
 
     if (s->sfo_hat != 0.0f)
     {
-        // the recurrence below is the identity at sfo_hat == 0 (fs_p == fs
-        // makes A, B0 and Bblk all zero): skip the build and the no-op multiply
+        // sfo_hat == 0 makes the recurrence the identity: skip the no-op
         const uint32_t len1 = (uint32_t)(s->n_up_req - 1) * n;
         double clk_off = s->sfo_hat / (float)n;
         double fs = s->bandwidth;
@@ -237,12 +223,6 @@ static int apply_cfo_sfo_correction(struct frame_sync *s)
     return cfo_int;
 }
 
-/* Rebuild the net-id decision windows on the corrected grid and decode the
- * pair.
- *
- * @return the grid start offset of the decimated pair, in samples (used by
- *         the mismatch trace below)
- */
 /* Candidate tones per window for the joint pair read. */
 #define NETID_JOINT_K 4
 
@@ -263,11 +243,9 @@ static int netid_top_tones(
     volk_32f_accumulator_s32f(&sum, s->fft_mag, n);
     *mean = sum / (float)n;
 
-    /* Strongest distinct tones, strongest first, no two within +-2 bins:
-     * work on a copy of the spectrum, take the first-max bin (later equal
-     * maxima must not win), then suppress its circular +-2 neighborhood at
-     * -1 — magnitudes are >= 0, so suppressed bins can never outrank an
-     * unselected one. */
+    /* Strongest distinct tones: take the first-max bin (equal maxima must
+     * not win), then suppress its circular +-2 neighborhood at -1 —
+     * magnitudes are >= 0, so suppressed bins can never outrank. */
     float *mask = s->netid_mask;
     memcpy(mask, s->fft_mag, n * sizeof(*mask));
     for (int c = 0; c < k; c++)
@@ -290,6 +268,8 @@ static int netid_top_tones(
     return cnt;
 }
 
+/* Rebuild the net-id decision windows on the corrected grid and decode the
+ * pair. */
 static void decode_netid_pair(struct frame_sync *s, int cfo_int)
 {
     const uint32_t n = s->number_of_bins;
@@ -315,10 +295,9 @@ static void decode_netid_pair(struct frame_sync *s, int cfo_int)
 
     s->netid_dec[0] = frame_sync_get_symbol_val(s, &s->net_ids_samp_dec[0], s->downchirp);
 
-    // the top-k scan feeds the worded-mode joint arbitration; accept-any
-    // reads only the argmax pair above. get_symbol_val leaves the scanned
-    // spectrum in fft_mag, so spectrum 0 must be scanned before symbol 1
-    // is demodulated into it
+    // the top-k scan feeds the worded-mode joint arbitration; get_symbol_val
+    // leaves the scanned spectrum in fft_mag, so spectrum 0 is scanned
+    // before symbol 1 is demodulated into it
     int bins0[NETID_JOINT_K], bins1[NETID_JOINT_K];
     float mags0[NETID_JOINT_K], mags1[NETID_JOINT_K];
     float mean0 = 0.0f, mean1 = 0.0f;
@@ -416,10 +395,9 @@ static int netid_verdict(struct frame_sync *s)
     int reset = 0;
 
     if (s->sync_words[0] == 0)
-    { /* accept-any: snap netid1 to the nearest multiple of 8 (the map
-       * id -> symbols puts every netid there, and the coarse sync's
-       * whole-chip slip is at most 2 bins, never enough to reach the
-       * neighbour 8 bins away) and correct the grid exactly as -w does. */
+    { /* accept-any: snap netid1 to the nearest multiple of 8 (where the map
+       * id -> symbols puts every netid; the coarse slip is at most 2 bins)
+       * and correct the grid exactly as -w does. */
         int32_t off = (int32_t)s->netid_dec[0];
         int32_t snap = 8 * ((off + 4) / 8);
         if (snap >= (int32_t)s->number_of_bins)
@@ -450,13 +428,9 @@ static int netid_verdict(struct frame_sync *s)
         }
     }
     else if (abs(s->netid_dec[0] - (int32_t)s->sync_words[0]) > 2)
-    { /* early-walk recovery: one symbol early, netid1's window catches the
-       * last preamble upchirp and netid2's catches netid1, so the pair
-       * reads (w0 - 8, w1 - 8) with its SPACING intact. That spacing is
-       * the evidence both symbols are real; the fix is a whole symbol of
-       * grid advance (the caller applies `pos += consume`), not the -8
-       * bins, which only reflect the wrong window. The reference's
-       * one-symbol-off path (frame_sync_impl.cc:718) is the late mirror. */
+    { /* early-walk recovery: one symbol early, the pair reads (w0-8, w1-8)
+       * with its spacing intact — the evidence both symbols are real; the
+       * fix is a whole symbol of grid advance, not the -8 bins. */
         int32_t d1 = (int32_t)util_mod(s->netid_dec[0] - (int32_t)s->sync_words[0], n);
         int32_t dsp = (int32_t)util_mod(
             s->netid_dec[1] - s->netid_dec[0] -
@@ -481,15 +455,10 @@ static int netid_verdict(struct frame_sync *s)
     else
     {
         s->net_id_off = s->netid_dec[0] - (int32_t)s->sync_words[0];
-        /* deviation (this port): netid2 is compared modulo n/4 bins —
-         * the low SF-2 symbol bits only. Real 0x2b traffic arrives as
-         * both (16, 88) and (16, 472): transmitter families differing
-         * only in the two top symbol bits, which Semtech sync comparison
-         * does not fully resolve (SX1262 receives when at least one
-         * nibble matches, SX1276 sometimes with none — Classy Code,
-         * "LoRa Sync Word Compatibility between SX127x and SX126x"). An
-         * exact compare dropped frames stock nodes accept. nibble<<3
-         * values are < n/4, so words from our own map compare exactly. */
+        /* deviation: netid2 compares modulo n/4 bins (the low SF-2 symbol
+         * bits) — real 0x2b traffic arrives as both (16, 88) and (16, 472),
+         * and an exact compare drops frames stock nodes accept. nibble<<3
+         * values are < n/4, so our own words compare exactly. */
         if (s->sync_words[1] != 0 && // match netid2 only if requested
             util_mod(s->netid_dec[1] - s->net_id_off, n / 4) !=
                 util_mod((int32_t)s->sync_words[1], n / 4))
@@ -523,7 +492,6 @@ static int netid_verdict(struct frame_sync *s)
     return 0;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:545-841; [gr-lora] demod_impl.cc:279
 int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
     *advance = 0;
@@ -582,11 +550,9 @@ int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t
         break;
 
     case FS_DOWNCHIRP1:
-        /* Deviation (this port): the whole-bin CFO decision integrates both
-         * SFD downchirps, not just the second one — their dechirp tones sit
-         * at the same bin, so summing the magnitude spectra gains ~a symbol
-         * on the single integer that shifts the netid decode by a whole chip.
-         * est_fft_mag is free here; the estimators are done. */
+        /* deviation: the whole-bin CFO integrates both SFD downchirps —
+         * their tones sit at the same bin, so summing the spectra gains ~a
+         * symbol on the integer that shifts the netid decode by a chip */
         frame_sync_get_symbol_val(s, s->symb_corr, s->upchirp);
         memcpy(s->est_fft_mag, s->fft_mag, s->number_of_bins * sizeof(*s->est_fft_mag));
         memcpy(
@@ -638,7 +604,6 @@ int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t
         s->sto_frac += s->sfo_hat * 4.25f;
         s->sfo_cum = ((s->sto_frac * osf) - (float)util_round(s->sto_frac * osf)) / osf;
         // frame_info tag not ported
-        // One chip per bin, driven by the whole-bin part as in the reference.
         s->consume +=
             (int32_t)(s->samples_per_symbol / 4) + (int32_t)s->oversampling_factor * cfo_int;
         s->symbol_cnt = 0;
@@ -664,7 +629,6 @@ int frame_sync_sync_step(struct frame_sync *s, const float complex *in, uint32_t
     return done;
 }
 
-// Reference: [gr-lora_sdr] frame_sync_impl.cc:845-871
 const float complex *
 frame_sync_output_step(struct frame_sync *s, const float complex *in, uint32_t *advance)
 {
@@ -675,8 +639,6 @@ frame_sync_output_step(struct frame_sync *s, const float complex *in, uint32_t *
 
     frame_sync_downsample_prologue(s, in, s->in_down);
 
-    // the 8 first windows are the PHY header; further payload windows follow
-    // once the caller decoded the header and set the symbol budget
     if (s->symbol_cnt < 8 || ((uint32_t)s->symbol_cnt < s->symb_numb && s->received_head))
     {
         // no STO correction, CFO left in

@@ -6,6 +6,7 @@
 #include "dsp.h"
 #include "logging.h"
 #include "resample.h"
+#include "utilities.h"
 
 struct resampler
 {
@@ -63,23 +64,29 @@ static float complex branch_mix_8(const struct resampler *rs, int i, float mu)
     const float *d = rs->coef_d + (size_t)i * 8;
     const float *xr = rs->w_re + rs->w_pos, *xi = rs->w_im + rs->w_pos;
     v8 hv, h0v, dv, xrv, xiv, pr, pi;
+
     memcpy(&h0v, h0, sizeof(hv));
     memcpy(&dv, d, sizeof(hv));
     memcpy(&xrv, xr, sizeof(hv));
     memcpy(&xiv, xi, sizeof(hv));
+
     hv = h0v + mu * dv;
     pr = hv * xrv;
     pi = hv * xiv;
+
     // pairwise hsum: one 128-bit combine per vector, then a 3-add tail
     typedef float v4 __attribute__((vector_size(16)));
     v4 rl, rh, il, ih;
+
     memcpy(&rl, &pr, sizeof(rl));
     memcpy(&rh, (const char *)&pr + sizeof(rl), sizeof(rl));
     memcpy(&il, &pi, sizeof(rl));
     memcpy(&ih, (const char *)&pi + sizeof(rl), sizeof(rl));
+
     v4 rt = rl + rh, it = il + ih;
     float ar = rt[0] + rt[1] + rt[2] + rt[3];
     float ai = it[0] + it[1] + it[2] + it[3];
+
     return ar + ai * I;
 }
 
@@ -190,12 +197,8 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
     rs->state = RESAMP_INTERP; // start mid-bank, like a fresh arbitrary resampler
 
     unsigned n = 2 * m * npfb + 1;
-    float *hf = malloc(n * sizeof(*hf));
-    if (!hf)
-    {
-        free(rs);
-        return NULL;
-    }
+    float *hf;
+    SAFE_ALLOC(hf, n, "resampler_create");
 
     dsp_kaiser_lowpass(n, fc / (float)npfb, (float)as, hf);
 
@@ -205,17 +208,11 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
 
     float gain = (float)npfb / sum; // normalize the branch bank to unit DC gain
 
-    rs->coef = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef));
-    rs->coef_d = malloc((size_t)npfb * rs->h_sub * sizeof(*rs->coef_d));
-    rs->w_re = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_re));
-    rs->w_im = calloc((size_t)2 * rs->h_sub, sizeof(*rs->w_im));
-    rs->block = malloc((size_t)((unsigned)ceil(rate) + 2) * sizeof(*rs->block));
-    if (!rs->coef || !rs->coef_d || !rs->w_re || !rs->w_im || !rs->block)
-    {
-        free(hf);
-        resampler_destroy(rs);
-        return NULL;
-    }
+    SAFE_ALLOC(rs->coef, (size_t)npfb * rs->h_sub, "resampler_create");
+    SAFE_ALLOC(rs->coef_d, (size_t)npfb * rs->h_sub, "resampler_create");
+    SAFE_CALLOC(rs->w_re, (size_t)2 * rs->h_sub, "resampler_create");
+    SAFE_CALLOC(rs->w_im, (size_t)2 * rs->h_sub, "resampler_create");
+    SAFE_ALLOC(rs->block, (size_t)((unsigned)ceil(rate) + 2), "resampler_create");
 
     for (unsigned i = 0; i < npfb; i++)
         for (unsigned k = 0; k < rs->h_sub; k++)
@@ -241,6 +238,11 @@ struct resampler *resampler_create(double rate_in, double rate_out, double bandw
         rs->delay);
 
     return rs;
+
+out:
+    free(hf);
+    resampler_destroy(rs);
+    return NULL;
 }
 
 void resampler_destroy(struct resampler *rs)

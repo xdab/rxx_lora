@@ -48,6 +48,7 @@ static void usage(void)
                  "\t         rate bw*os and the default capture rate\n"
                  "\t[--input-rate HZ] RSP capture rate (default: bw*os); snapped to\n"
                  "\t         the API's 2/4/8 MS/s\n"
+                 "\t         (HZ values take k/M/G suffixes: 869.525M = 869.525 MHz)\n"
                  "\n"
                  "Example:\t" APP_NAME " --center-freq 869.525e6 -s 9 -w 0x2b\n"
                  "\n");
@@ -55,7 +56,6 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    // --- defaults ---
     const char *selector = "0";
     int gain_rdb = -1;  // < 0 with lna: API AGC
     int lna_state = -1; // < 0 with gain: API AGC
@@ -97,7 +97,6 @@ int main(int argc, char **argv)
             break;
         case 'v':
         case 'q':
-            // -v/-v1/-v 1 and -q/-q1/-q 1
             log_verbosity_opt(opt, argc, argv);
             break;
         default:

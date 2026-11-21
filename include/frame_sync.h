@@ -3,6 +3,8 @@
  * @brief LoRa frame synchronization: DETECT > SYNC > corrected payload
  *        windows. The state is opaque; the caller drives the state machine
  *        with the step functions and reads results through the snapshot.
+ *
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:108; [gr-lora] demod_impl.cc:109.
  */
 
 #ifndef FRAME_SYNC_H
@@ -63,7 +65,8 @@ struct frame_sync_status
  *            DETECT windows before the bin decision (1 = off, values < 1 treated as 1)
  * @return the state, or NULL on allocation failure (stderr printed)
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:25; [gr-lora] demod_impl.cc:54.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:25,45,66-73,77-78,128-137,198-205;
+ * [gr-lora] demod_impl.cc:54.
  */
 struct frame_sync *frame_sync_create(
     uint8_t spreading_factor,
@@ -106,7 +109,7 @@ int frame_sync_detect_step(struct frame_sync *fs, const float complex *in, int64
  * @return 1 once the sync word is accepted, 0 while walking, -1 on a
  *         sync-word mismatch (the state resets to DETECT)
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:545; [gr-lora] demod_impl.cc:279.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:545-841; [gr-lora] demod_impl.cc:279.
  */
 int frame_sync_sync_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);
 
@@ -122,7 +125,7 @@ int frame_sync_sync_step(struct frame_sync *fs, const float complex *in, uint32_
  * @return the corrected window (valid until the next call), or NULL when the
  *         symbol budget is spent
  *
- * Reference: [gr-lora_sdr] frame_sync_impl.cc:845.
+ * Reference: [gr-lora_sdr] frame_sync_impl.cc:845-871.
  */
 const float complex *
 frame_sync_output_step(struct frame_sync *fs, const float complex *in, uint32_t *advance);

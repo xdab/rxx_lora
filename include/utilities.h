@@ -8,6 +8,38 @@
 
 #include <complex.h>
 #include <stdint.h>
+#include <stdlib.h>
+
+#include "logging.h"
+
+/**
+ * @brief Allocate @p count elements into @p ptr; on failure log what and
+ *        which allocation it was, then jump to the enclosing function's
+ *        `out` label — the shared cleanup convention: everything allocated
+ *        so far is freed there, so all owned pointers must start NULL.
+ */
+#define SAFE_ALLOC(ptr, count, what)                                                               \
+    do                                                                                             \
+    {                                                                                              \
+        (ptr) = malloc((size_t)(count) * sizeof(*(ptr)));                                          \
+        if (!(ptr))                                                                                \
+        {                                                                                          \
+            log_error("%s: out of memory (%s)\n", (what), #ptr);                                   \
+            goto out;                                                                              \
+        }                                                                                          \
+    } while (0)
+
+/** @brief SAFE_ALLOC() with zeroed memory (calloc). */
+#define SAFE_CALLOC(ptr, count, what)                                                              \
+    do                                                                                             \
+    {                                                                                              \
+        (ptr) = calloc((size_t)(count), sizeof(*(ptr)));                                           \
+        if (!(ptr))                                                                                \
+        {                                                                                          \
+            log_error("%s: out of memory (%s)\n", (what), #ptr);                                   \
+            goto out;                                                                              \
+        }                                                                                          \
+    } while (0)
 
 /**
  * @brief Modulus that is always non-negative: result in [0, b).

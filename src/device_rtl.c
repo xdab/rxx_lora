@@ -100,16 +100,12 @@ static void rtl_async_cb(unsigned char *buf, uint32_t len, void *ctx)
     }
 
     pthread_mutex_lock(&s->st.lock);
-    s->st.delivered += m;
     stream_make_room(&s->st, m);
     if (ring_reserve(s->st.ring, m) == 0)
         ring_write(s->st.ring, s->conv, m);
     else
         s->st.dropped += m;
 
-    double now = mono_seconds();
-    if (now - s->st.report_time >= STREAM_REPORT_SECONDS)
-        stream_report(&s->st, "RTL", STREAM_LOSS_PPM);
     pthread_cond_signal(&s->st.cond);
     pthread_mutex_unlock(&s->st.lock);
 }
@@ -259,8 +255,6 @@ struct device *device_open_rtl(
     s->base.ops = &rtl_ops;
     s->dev = dev;
     s->rate = rate;
-    s->st.rate = rate;
-    s->st.open_time = s->st.report_time = mono_seconds();
 
     s->reader_started = pthread_create(&s->reader, NULL, rtl_reader, s) == 0;
     if (!s->reader_started)

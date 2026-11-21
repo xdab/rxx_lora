@@ -25,12 +25,13 @@ from common import add_awgn, max_jobs
 
 BIN_ARGS = {
     # the DETECT-lock and sync lines are DEBUG, so the binary runs with -v;
-    # "no frame detected" also lands on stderr, so anchor on the exact phrase
+    # "no frame detected" also lands on stderr, so anchor on the exact phrase.
+    # The CRC verdict only lives on stdout (the JSON frame record).
     "DETECT lock": "DEBUG: frame detected",
     "sync survive": "INFO: sync word ok",
     "header ok": "INFO: header: pay_len=",
-    "CRC valid": "INFO: CRC valid!",
-    "CRC absent": "INFO: CRC absent",
+    "CRC valid": None,  # stdout: '"crc_valid":true'
+    "CRC absent": None,  # stdout: '"crc_valid":null'
 }
 
 
@@ -69,7 +70,10 @@ def run_once(bin_path, sf, avg, iq, extra=()):
         text=True,
         errors="replace",
     )
-    return {name: (needle in cp.stderr) for name, needle in BIN_ARGS.items()}
+    hits = {name: (needle is not None and needle in cp.stderr) for name, needle in BIN_ARGS.items()}
+    hits["CRC valid"] = '"crc_valid":true' in cp.stdout
+    hits["CRC absent"] = '"crc_valid":null' in cp.stdout
+    return hits
 
 
 def run_noise_trial(job):

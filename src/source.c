@@ -158,9 +158,6 @@ source_create(struct device *dev, int sf, int os, double bandwidth, int conj, in
     ring_commit(s->ring, s->slack);
     s->off = -(long)s->slack;
 
-    /* Input-rate conversion: the chain runs at exactly bw*os; a device at any
-     * other native rate is pulled through a streaming resampler as the chain
-     * asks for samples. */
     double rate_target = bandwidth * (double)os;
     double dev_rate = device_rate(dev);
     if (dev_rate <= 0.0)
@@ -168,8 +165,7 @@ source_create(struct device *dev, int sf, int os, double bandwidth, int conj, in
 
     s->rate_out = rate_target;
 
-    /* Strip the zero-IF tuner's DC offset and 1/f junk at the device rate,
-     * before the resampler; the corner is far below the signal. */
+    // DC blocker at the device rate, before the resampler
     if (s->dc_block_on)
         dc_block_init(&s->dc, dev_rate, bandwidth / 1000.0);
 

@@ -1,13 +1,12 @@
 /**
  * @file logging.h
  * @brief Leveled logging to stderr; stdout carries the structured per-frame
- *        records (output.h). Every call prints nothing below the threshold.
+ *        records (output.h).
  */
 
 #ifndef LOGGING_H
 #define LOGGING_H
 
-// Severity ladder; a message prints when its level >= the threshold.
 enum log_level
 {
     LOG_TRACE = 0, // per-window/per-symbol internals, can spam
@@ -18,7 +17,6 @@ enum log_level
     LOG_OFF = 5,   // silences everything
 };
 
-/** Set the threshold; only messages at or above it are printed. */
 void log_set_level(enum log_level level);
 
 void log_trace(const char *fmt, ...);
