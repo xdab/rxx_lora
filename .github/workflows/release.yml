@@ -18,8 +18,10 @@ permissions:
   contents: write
 
 jobs:
-  # Source tarball + gate: build the core binary from the extracted tarball
-  # and run the CI regression arm on it (proves the archive is complete)
+  # Gate: extract the source archive, build the core binary from it and run
+  # the CI regression arm (proves the tagged tree is complete and decodes).
+  # The archive itself is not published — GitHub auto-generates source
+  # snapshots for the tag
   build-source:
     runs-on: ubuntu-latest
     steps:
@@ -290,7 +292,9 @@ jobs:
   # decisions.md #5
 
   # Single owner of the Releases page: fresh SHA256SUMS over every asset,
-  # draft release created if missing, all assets clobbered onto it
+  # draft release created if missing, all assets clobbered onto it.
+  # source-assets is excluded: GitHub auto-generates source archives for the
+  # tag, so the custom tarball is gate-only and never published (decisions.md #1)
   publish:
     if: github.ref_type == 'tag'
     needs: [build-source, build-deb, build-rpm, build-win64]
@@ -298,7 +302,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: "*-assets"
+          pattern: |
+            *-assets
+            !source-assets
           merge-multiple: true
           path: assets
 

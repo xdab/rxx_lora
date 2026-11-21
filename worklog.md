@@ -67,6 +67,16 @@ recommendation; the permanently-failing job was removed from the workflow so
 the release flow stays green. Final tag run next: amends the published v1.0.0
 with the win64 zip + refreshed SHA256SUMS.
 
+### 2026-11-21 12:15 — all six assets on the published v1.0.0; owner decisions round
+
+Final tag run 44902593149 all green: published release now carries the win64
+zip (2.1 MB, self-contained exes+dlls) + refreshed SHA256SUMS alongside deb,
+rpm, linux-x86_64 tarball. Owner then ruled on the two pending questions:
+drop the custom source tarball from the release (GitHub's auto snapshots are
+the same tagged content — decisions.md #1 resolved; publish job excludes
+source-assets, the published rxx_lora-1.0.0.tar.gz asset was deleted, the
+gate stays), and keep the fc45 dist tag (decisions.md #6 half-resolved).
+
 ### Decisions on file
 
 - `decisions.md` — items pending the owner: source-tarball vs auto-snapshot,

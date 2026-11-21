@@ -3,24 +3,15 @@
 Questions reserved for the project's primary architect. Each entry: question,
 options, recommendation, context — enough to decide cold. Recorded, not made.
 
-## 1. Keep the custom source tarball, or rely on GitHub's auto snapshots?
+## 1. Custom source tarball vs GitHub's auto snapshots — RESOLVED 2026-11-21
 
-Every release/tag page auto-generates "Source code (zip)" and
-"Source code (tar.gz)" from the tag — that part can't be removed. The release
-workflow additionally builds its own `rxx_lora-<ver>.tar.gz`.
-
-- **Keep both (recommended)** — the custom tarball is the one the gate tests
-  (extract → `make file` → `tools/regression.py --no-capture`), it carries the
-  release version in a `VERSION` file (which a future Makefile version stamp
-  reads), consistent naming `rxx_lora-1.0.0.tar.gz`, clean versioned top dir.
-  Auto snapshots stay as untested extras.
-- **Drop the custom one** — publish job stops uploading `*.tar.gz`; the gate
-  loses its "archive completeness" meaning (it would test a file we don't
-  ship). ~10 workflow lines saved.
-
-Context: raised in session; user asked "we don't have to duplicate this,
-right?" — recommendation given, no verdict yet. Nothing blocks on it; current
-state ships both.
+GitHub auto-generates "Source code (zip)/(tar.gz)" for every tag; the workflow
+also built a custom `rxx_lora-<ver>.tar.gz` (version dir, VERSION file, tested
+by the gate). The owner resolved it: **drop the custom tarball from the
+release** — same tagged content, don't occupy asset space. The gate still
+builds the archive (insurance that the tagged tree is complete), but the
+publish job excludes `source-assets` and the published custom tarball was
+deleted. Auto snapshots are the canonical source download.
 
 ## 2. Linux binary tarball: linkage flavor
 
