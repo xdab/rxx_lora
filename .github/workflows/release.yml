@@ -1,0 +1,327 @@
+name: Release
+
+# Release assets. Build jobs run in parallel and upload their outputs as
+# workflow artifacts; the publish job attaches them to a DRAFT release on
+# v* tag pushes (publish manually after review). A workflow_dispatch run is
+# a dry run — nothing ever touches the Releases page. Re-running a tag run
+# updates that release and clobbers its assets.
+#
+# Gotcha: a tag push executes THIS file as it exists in the tagged commit —
+# land workflow changes on main before tagging.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Gate: extract the source archive, build the core binary from it and run
+  # the CI regression arm (proves the tagged tree is complete and decodes).
+  # The archive itself is not published — GitHub auto-generates source
+  # snapshots for the tag
+  build-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        run: |
+          # tag push: the tag itself; dry run: describe from history
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="$(git describe --tags --always --dirty | sed 's/^v//')"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Source tarball
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          name="rxx_lora-$v"
+          d="$(mktemp -d)"
+          git archive --format=tar --prefix="$name/" HEAD | tar -x -C "$d"
+          echo "$v" > "$d/$name/VERSION" # release version, self-identifies the tarball
+          tar -czf "$name.tar.gz" -C "$d" "$name"
+
+      - name: Gate — build + regression from the tarball
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev
+          pip install numpy
+          d="$(mktemp -d)"
+          tar -xzf rxx_lora-*.tar.gz -C "$d"
+          cd "$d"/rxx_lora-*
+          make file
+          python3 tools/regression.py --no-capture
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-assets
+          path: rxx_lora-*.tar.gz
+
+  # Debian package + Linux binary tarball: bookworm container for glibc
+  # backward compatibility. Portable codegen via a CFLAGS command-line
+  # override (no -march=native); the probe-based Makefile stages file_lora +
+  # rtl_lora only — rsp_lora links the proprietary SDRplay API, which no
+  # distro packages
+  build-deb:
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - name: Toolchain
+        run: apt-get update && apt-get install -y gcc make git libfftw3-dev librtlsdr-dev python3-numpy
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        # container jobs run sh and git refuses the runner-owned checkout, so
+        # no describe here: the tag names the release; a dry run uses the SHA
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build + gate
+        run: |
+          make CFLAGS="-O3 -Wall -Wextra -I./include" install DESTDIR="$PWD/stage" PREFIX=/usr
+          python3 tools/regression.py --no-capture
+
+      - name: Stage docs + strip
+        run: |
+          strip --strip-unneeded stage/usr/bin/*
+          install -d stage/usr/share/doc/rxx-lora
+          install -m 644 README.md LICENSE.md stage/usr/share/doc/rxx-lora/
+
+      # The stripped portable binaries double as the Linux tarball: same
+      # bookworm build, glibc >= 2.36 floor (see decisions.md #2)
+      - name: Linux binary tarball
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          name="rxx_lora-$v-linux-$(uname -m)"
+          install -d "$name/bin"
+          install -m 755 stage/usr/bin/file_lora stage/usr/bin/rtl_lora "$name/bin/"
+          install -m 644 README.md LICENSE.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bin-assets
+          path: rxx_lora-*-linux-*.tar.gz
+
+      - name: Package metadata
+        run: |
+          install -d stage/DEBIAN
+          printf '%s\n' \
+            "Package: rxx-lora" \
+            "Version: ${{ steps.ver.outputs.version }}" \
+            "Section: comm" \
+            "Priority: optional" \
+            "Architecture: $(dpkg --print-architecture)" \
+            "Maintainer: xdab <47300315+xdab@users.noreply.github.com>" \
+            "Homepage: https://github.com/xdab/rxx_lora" \
+            "Depends: libfftw3-single3, librtlsdr0" \
+            "Description: LoRa (CSS) receiver for RTL-SDR dongles and SDRplay RSPs" \
+            " A plug-and-play LoRa receiver in the spirit of rtl_fm: SDR in," \
+            " decoded packets out on stdout and JSONL, no GNU Radio." \
+            " ." \
+            " This package ships file_lora (decode I/Q recordings) and rtl_lora" \
+            " (live RTL-SDR reception). rsp_lora needs the proprietary SDRplay" \
+            " API, which is not redistributable; install it from the vendor." \
+            > stage/DEBIAN/control
+
+      - name: dpkg-deb
+        run: |
+          arch="$(dpkg --print-architecture)"
+          dpkg-deb --build --root-owner-group stage "rxx-lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+          # dependency names and file layout resolved against bookworm's index
+          apt-get install -y --dry-run "./rxx-lora_${{ steps.ver.outputs.version }}_${arch}.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-assets
+          path: rxx-lora_*.deb
+
+  # Fedora RPM: same portable build, packaged by rpmbuild. AutoReqProv stays
+  # on — dependencies (libfftw3f, librtlsdr) are derived from the binaries'
+  # SONAMEs, so no package names are guessed; `dnf install` of the result
+  # validates that they resolve against Fedora's repos
+  build-rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Toolchain
+        run: dnf install -y gcc make git fftw-devel rtl-sdr-devel python3-numpy rpm-build
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build + gate
+        run: |
+          make CFLAGS="-O3 -Wall -Wextra -I./include" file rtl
+          python3 tools/regression.py --no-capture
+
+      - name: Package
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          # prebuilt binaries ride in SOURCES; rpmbuild strips and derives
+          # the SONAME dependencies itself
+          for d in BUILD RPMS SOURCES SPECS SRPMS; do mkdir -p rpmbuild/$d; done
+          install -m 755 bin/file_lora bin/rtl_lora rpmbuild/SOURCES/
+          install -m 644 README.md LICENSE.md rpmbuild/SOURCES/
+          printf '%s\n' \
+            "Name:           rxx-lora" \
+            "Version:        $v" \
+            "Release:        1%{?dist}" \
+            "Summary:        LoRa (CSS) receiver for RTL-SDR dongles and SDRplay RSPs" \
+            "License:        GPLv3+" \
+            "URL:            https://github.com/xdab/rxx_lora" \
+            "" \
+            "%description" \
+            "A plug-and-play LoRa receiver in the spirit of rtl_fm: SDR in," \
+            "decoded packets out on stdout and JSONL, no GNU Radio." \
+            "" \
+            "Ships file_lora (decode I/Q recordings) and rtl_lora (live RTL-SDR" \
+            "reception). rsp_lora needs the proprietary SDRplay API, which is" \
+            "not redistributable; install it from the vendor." \
+            "" \
+            "%prep" \
+            "%build" \
+            "%install" \
+            "mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_docdir}/%{name}" \
+            "install -m 755 %{_sourcedir}/file_lora %{buildroot}%{_bindir}/" \
+            "install -m 755 %{_sourcedir}/rtl_lora %{buildroot}%{_bindir}/" \
+            "install -m 644 %{_sourcedir}/README.md %{_sourcedir}/LICENSE.md %{buildroot}%{_docdir}/%{name}/" \
+            "" \
+            "%files" \
+            "%{_bindir}/file_lora" \
+            "%{_bindir}/rtl_lora" \
+            "%{_docdir}/%{name}" \
+            "" \
+            "%changelog" \
+            "* Sat Nov 21 2026 xdab <47300315+xdab@users.noreply.github.com> - $v-1" \
+            "- Release $v; see the release notes for changes." \
+            > rpmbuild/SPECS/rxx-lora.spec
+          rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/rxx-lora.spec
+          mv rpmbuild/RPMS/*/*.rpm .
+          # the real test: resolves the auto-derived dependencies for real
+          dnf install -y ./rxx-lora-*.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-assets
+          path: rxx-lora-*.rpm
+
+  # Windows 64-bit zip: same UCRT64 stack as the CI windows gate (see
+  # ci.yml); `make dlls` stages the import-table-derived DLLs into bin/,
+  # so the zip is self-contained. rsp_lora needs the proprietary SDRplay
+  # API, which cannot be bundled (EULA)
+  build-win64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-fftw mingw-w64-ucrt-x86_64-rtl-sdr
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $v = $env:GITHUB_REF_NAME -replace '^v','' }
+          else { $v = $env:GITHUB_SHA.Substring(0,7) }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build + stage DLLs
+        shell: msys2 {0}
+        run: make CFLAGS="-O3 -Wall -Wextra -I./include" file rtl dlls
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          python -m pip install numpy
+          python tools/regression.py --bin bin/file_lora.exe --no-capture
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path "rxx_lora-$v-win64" | Out-Null
+          Copy-Item bin/*.exe,bin/*.dll "rxx_lora-$v-win64/"
+          Copy-Item README.md,LICENSE.md "rxx_lora-$v-win64/"
+          Compress-Archive -Path "rxx_lora-$v-win64" -DestinationPath "rxx_lora-$v-win64.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win64-assets
+          path: rxx_lora-*-win64.zip
+
+  # No Windows 32-bit arm: MSYS2's i686 repo dropped the fftw/rtl-sdr
+  # packages, and a from-source i686 dependency farm was tried and dropped
+  # by owner decision — see decisions.md #5 for the full arc
+
+  # Single owner of the Releases page: fresh SHA256SUMS over every asset,
+  # draft release created if missing, all assets clobbered onto it. Drafts
+  # get no generated notes — the owner writes them before publishing.
+  # source-assets is excluded: GitHub auto-generates source archives for the
+  # tag, so the custom tarball is gate-only and never published (decisions.md #1)
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [build-source, build-deb, build-rpm, build-win64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-assets"
+          merge-multiple: true
+          path: assets
+
+      - name: Attach to the draft release
+        # GH_REPO: the publish job has no checkout, gh can't infer the repo
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd assets
+          # the custom source archive is gate-only — GitHub's auto snapshots
+          # are the canonical source download (decisions.md #1)
+          rm -f "rxx_lora-${GITHUB_REF_NAME#v}.tar.gz"
+          # glob expands before the redirect creates the file, so the
+          # checksum file never hashes itself
+          sha256sum * > SHA256SUMS
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --draft \
+                 --title "rxx_lora ${GITHUB_REF_NAME#v}"
+          gh release upload "$tag" --clobber *
