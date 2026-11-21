@@ -1,0 +1,81 @@
+name: Release
+
+# Source tarball releases. A v* tag push builds, gates, and attaches the
+# tarball + checksums to a DRAFT release for that tag (publish manually after
+# review); a workflow_dispatch run is a dry run — assets land under the run
+# summary, never on the Releases page. Re-running a tag run updates that
+# release and clobbers its assets.
+#
+# Gotcha: a tag push executes THIS file as it exists in the tagged commit —
+# land workflow changes on main before tagging.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  source-tarball:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Version
+        id: ver
+        run: |
+          # tag push: the tag itself; dry run: describe from history
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="$(git describe --tags --always --dirty | sed 's/^v//')"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Source tarball
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          name="rxx_lora-$v"
+          d="$(mktemp -d)"
+          git archive --format=tar --prefix="$name/" HEAD | tar -x -C "$d"
+          echo "$v" > "$d/$name/VERSION" # release version, self-identifies the tarball
+          tar -czf "$name.tar.gz" -C "$d" "$name"
+          sha256sum "$name.tar.gz" > SHA256SUMS
+
+      # Proves the archive is complete and functional: build the core binary
+      # from the extracted tarball and run the CI regression arm on it
+      - name: Gate — build + regression from the tarball
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev
+          pip install numpy
+          d="$(mktemp -d)"
+          tar -xzf rxx_lora-*.tar.gz -C "$d"
+          cd "$d"/rxx_lora-*
+          make file
+          python3 tools/regression.py --no-capture
+
+      - name: Dry-run assets (workflow_dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            rxx_lora-*.tar.gz
+            SHA256SUMS
+
+      - name: Attach to a draft release (tag push)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --draft --generate-notes \
+                 --title "rxx_lora ${{ steps.ver.outputs.version }}"
+          gh release upload "$tag" rxx_lora-*.tar.gz SHA256SUMS --clobber
