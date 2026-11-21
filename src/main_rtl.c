@@ -47,6 +47,7 @@ static void usage(void)
                  "\t         rate bw*os and the default capture rate\n"
                  "\t[--input-rate HZ] dongle capture rate (default: bw*os); snapped\n"
                  "\t         to a rate the RTL2832U supports\n"
+                 "\t         (HZ values take k/m/g suffixes: 869.525m = 869.525 MHz)\n"
                  "\n"
                  "Example:\t" APP_NAME " --center-freq 869.525e6 -s 9 -w 0x2b\n"
                  "\n");
@@ -54,7 +55,6 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    // --- defaults ---
     int dev_index = 0;
     double gain_db = -1.0; // < 0 = automatic tuner gain
     int ppm = 0;
@@ -98,7 +98,6 @@ int main(int argc, char **argv)
             break;
         case 'v':
         case 'q':
-            // -v/-v1/-v 1 and -q/-q1/-q 1
             log_verbosity_opt(opt, argc, argv);
             break;
         default:

@@ -43,6 +43,7 @@ static void usage(void)
                  "\t[--input-rate HZ] sample rate of FILE; the file is resampled\n"
                  "\t         to bw*os before decoding; omit when the\n"
                  "\t         capture is already at bw*os\n"
+                 "\t         (HZ values take k/m/g suffixes: 868.1m = 868.1 MHz)\n"
                  "\n"
                  "Example:\t" APP_NAME " -w 0x2b --center-freq 868.1e6 --bw 125e3 frame.cf32\n"
                  "\n");
@@ -50,8 +51,6 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    // --- defaults: shared option set, file-specific center-freq 0 = off;
-    // --input-rate rides the shared capture_rate field ---
     struct live_opts o = {
         .sf = 9,
         .os = 2,
@@ -81,7 +80,6 @@ int main(int argc, char **argv)
         {
         case 'v':
         case 'q':
-            // -v/-v1/-v 1 and -q/-q1/-q 1
             log_verbosity_opt(opt, argc, argv);
             break;
         default:
