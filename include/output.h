@@ -10,7 +10,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// One decoded frame's fields, ready to render.
+/**
+ * One decoded frame's fields, ready to render.
+ */
 struct output_record
 {
     const uint8_t *packet; // de-whitened on-air payload (res->bytes)
@@ -22,12 +24,12 @@ struct output_record
 };
 
 /**
- * @brief Render one record as a single JSON line on stdout. @p b64 is the
- *        record's already base64-encoded packet (b64_encode).
+ * @brief Render one record as a single JSON line on stdout; the packet is
+ *        base64-encoded here.
  *
  * A fixed printf template, not a serializer; every other field is a JSON
  * number, boolean or null.
  */
-void output_frame(const struct output_record *rec, const char *b64);
+void output_frame(const struct output_record *rec);
 
 #endif // OUTPUT_H

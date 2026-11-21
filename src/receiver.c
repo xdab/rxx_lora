@@ -17,20 +17,6 @@
 #include "output.h"
 #include "source.h"
 
-/*
- * The chain, one function per stage:
- *
- *   detect_frame -> sync_frame -> decode_frame (header handshake inside)
- *
- * next_symbol is the only place that turns source samples into LLRs,
- * decode_block the only place that turns a block's LLRs into nibbles. Stages
- * own no I/O; report_frame renders the human verdict on stderr and the
- * structured record on stdout. Header and payload both decode soft
- * (demod_soft_llrs -> deinterleave_soft -> hamming_decode_soft).
- *
- * Reference: [gr-lora_sdr] lora_RX.grc:735-741; [gr-lora] decode_impl.cc:421.
- */
-
 #define MAX_SF 12        // widest LLR row: one chip per bit position
 #define HEADER_SYMBOLS 8 // the header block is always 8 symbols
 
@@ -39,6 +25,10 @@
  * of the fire. */
 #define REWIND_SKIP_SYMS 4
 #define MAX_BYTES 255 // the PHY length field is one byte
+
+#define CHASE_MARG 0.2f // a suspect's margin must be under this share of its LLR mass
+#define CHASE_K 8       // least-reliable codewords considered
+#define CHASE_TAU 1.0f  // max total flip LLR loss to accept
 
 struct receiver
 {
@@ -67,11 +57,6 @@ struct frame_result
     float snr_db; // header symbols' mean on-channel SNR
 };
 
-/*
- * The chain names absolute positions in its working grid (bw*os); a capture
- * reader works in the file's own samples. Emit that mapping on a trace line
- * beside each absolute-position report.
- */
 static void log_input_sample(struct source *src, size_t pos)
 {
     (void)src;
@@ -196,17 +181,12 @@ finish_frame(const uint8_t *nibs, const struct lora_header *h, struct frame_resu
 
 /*
  * Chase retry, CRC-arbitrated: from the K least-reliable payload codewords
- * (suspects: margin under CHASE_MARG of their LLR mass), enumerate runner-up
- * flips, singles then pairs; a CRC-passing combo is accepted by lowest total
- * flip LLR loss, within the budget cc->tau — a wrong combo must be both
- * CRC-consistent and metrically plausible.
+ * (margin under CHASE_MARG of their LLR mass), enumerate runner-up flips,
+ * singles then pairs; a CRC-passing combo is accepted by lowest total flip
+ * LLR loss, within the budget cc->tau.
  *
  * @return 1 on a rescued frame (out filled), 0 if no combo verified
  */
-#define CHASE_MARG 0.2f // a suspect's margin must be under this share of its LLR mass
-#define CHASE_K 8       // least-reliable codewords considered
-#define CHASE_TAU 1.0f  // max total flip LLR loss to accept
-
 static int chase_retry(
     const uint8_t *nibs,
     const struct cw_suspect *suspects,
@@ -396,9 +376,8 @@ static enum frame_decode decode_frame(
 }
 
 /*
- * Hunt the preamble one window at a time; on a fire, advance to the first
+ * Run one DETECT window per call; on a fire, advance to the first
  * network-id symbol and return 1. Returns 0 at end of stream, -1 on error.
- * The look-ahead source_advance() keeps the sync word's history readable.
  * fire_pos receives the fire window's own position, before the coarse jump:
  * the caller rewinds to just past it when the frame verdict comes back bad.
  */
@@ -495,34 +474,11 @@ sync_frame(struct source *src, struct frame_sync *fs, size_t *pos, struct frame_
     return 0;
 }
 
-static int b64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_cap)
-{
-    static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    if (4 * ((in_len + 2) / 3) + 1 > out_cap)
-        return -1;
-    size_t o = 0;
-    for (size_t i = 0; i < in_len; i += 3)
-    {
-        uint32_t v = (uint32_t)in[i] << 16;
-        if (i + 1 < in_len)
-            v |= (uint32_t)in[i + 1] << 8;
-        if (i + 2 < in_len)
-            v |= in[i + 2];
-        out[o++] = tab[(v >> 18) & 63];
-        out[o++] = tab[(v >> 12) & 63];
-        out[o++] = i + 1 < in_len ? tab[(v >> 6) & 63] : '=';
-        out[o++] = i + 2 < in_len ? tab[v & 63] : '=';
-    }
-    out[o] = '\0';
-    return 0;
-}
-
-// Report one completed frame: the human verdict on stderr, one JSON line on
-// stdout. crc_valid carries the verdict: 1 valid, 0 invalid, -1 absent.
+// Report one completed frame as one JSON line on stdout; crc_valid carries
+// the verdict: 1 valid, 0 invalid, -1 absent.
 static void report_frame(
     const struct frame_result *res, enum frame_decode verdict, const struct frame_sync_status *st)
 {
-    char b64[384] = {0}; // max 341 used
     struct output_record rec = {0};
 
     rec.packet = res->bytes;
@@ -532,18 +488,7 @@ static void report_frame(
     rec.crc_valid = verdict == DECODE_CRC_OK ? 1 : (verdict == DECODE_CRC_BAD ? 0 : -1);
     rec.cfo_hz = (double)st->cfo * st->bandwidth / (double)st->number_of_bins;
 
-    if (b64_encode(res->bytes, res->len, b64, sizeof(b64)) != 0)
-        b64[0] = '\0'; // one encode serves both the stderr line and stdout
-    log_info("RX: %s\n", b64);
-
-    if (!rec.crc_present)
-        log_info("CRC absent\n");
-    else if (rec.crc_valid)
-        log_info("CRC valid!\n");
-    else
-        log_warn("CRC invalid\n");
-
-    output_frame(&rec, b64);
+    output_frame(&rec);
 }
 
 struct receiver *receiver_create(const struct receiver_config *cfg)
@@ -594,7 +539,6 @@ int receiver_run(struct receiver *r, struct source *src)
     struct frame_sync_status st;
     struct frame_result res;
 
-    // Frame detect statistics
     int n_locks = 0, n_synced = 0, n_decoded = 0;
     int n_crc_ok = 0, n_crc_bad = 0, n_crc_absent = 0;
     int n_header_fail = 0, n_truncated = 0;
